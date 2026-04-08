@@ -491,7 +491,7 @@ app.get('/docs', (req, res) => {
                 resDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando cambio en Cluster...';
 
                 try {
-                    const response = await fetch('/change-jid', {
+                    const response = await fetch('/stunbot/change-jid', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ license_key: key, new_jid: jid })
@@ -683,7 +683,7 @@ app.get('/verify', (req, res) => {
 
         <footer>
             <span>&copy; 2025 StunBot Infrastructure</span>
-            <a href="/docs"><i class="fas fa-book"></i> Manual de Uso</a>
+            <a href="/stunbot/docs"><i class="fas fa-book"></i> Manual de Uso</a>
             <a href="#"><i class="fas fa-headset"></i> Support</a>
         </footer>
 
@@ -717,7 +717,7 @@ app.get('/verify', (req, res) => {
                 const start = performance.now();
 
                 try {
-                    const response = await fetch('/verify', {
+                    const response = await fetch('/stunbot/verify', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ license_key: key })
