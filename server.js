@@ -60,28 +60,29 @@ app.use(express.json());
 
 const crypto = require('crypto');
 
-app.post('/api/tebex-webhook', async (req, res) => {
-    // 1. Verificación de Seguridad (Firma de Tebex)
-    const signature = req.headers['x-signature'];
-    const bodyString = JSON.stringify(req.body);
-    const secret = process.env.TEBEX_SECRET;
-
-    // Calculamos la firma localmente para comparar
-    const hash = crypto.createHmac('sha256', secret).update(bodyString).digest('hex');
-
-    if (signature !== hash) {
-        console.error("⚠️ Intento de Webhook no autorizado (Firma inválida)");
-        return res.status(401).send('Invalid Signature');
-    }
-
+app.post('/tebex-webhook', async (req, res) => {
     const data = req.body;
 
-    // 2. Responder al Ping de Validación de Tebex
-    if (data.type === 'validation.webhook') {
+    // --- 1. RESPUESTA DE VALIDACIÓN (CRITICO PARA TEBEX) ---
+    // Tebex envía esto para verificar que el servidor es tuyo.
+    if (data && data.type === 'validation.webhook') {
+        console.log("✅ Validando Webhook de Tebex...");
         return res.status(200).json({ id: data.id });
     }
 
-    // 3. Procesar Pago Completado
+    // --- 2. VERIFICACIÓN DE SEGURIDAD (FIRMA) ---
+    const signature = req.headers['x-signature'];
+    const secret = process.env.TEBEX_SECRET;
+    
+    if (signature && secret) {
+        const bodyString = JSON.stringify(req.body);
+        const hash = crypto.createHmac('sha256', secret).update(bodyString).digest('hex');
+        if (signature !== hash) {
+            return res.status(401).send('Invalid Signature');
+        }
+    }
+
+    // --- 3. PROCESAR PAGO ---
     if (data.type === 'payment.completed') {
         const email = data.subject.customer.email;
         const transactionId = data.subject.transaction_id;
