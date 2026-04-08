@@ -6,274 +6,198 @@ const renderStore = () => {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>StunBot | Digital Store</title>
+        
+        <!-- Librerías Externas -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+        
+        <!-- SDK de Tebex (Modal Hytale) -->
+        <script src="https://js.tebex.io/"></script>
+
         <style>
-            :root { --bg: #030712; --card: #0f172a; --primary: #38bdf8; --border: rgba(255, 255, 255, 0.05); }
-            body { font-family: 'Inter', sans-serif; background: var(--bg); color: white; margin: 0; }
-            .container { max-width: 1100px; margin: 80px auto; padding: 20px; display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 40px; }
+            :root { --bg: #030712; --card: #0f172a; --primary: #38bdf8; --success: #10b981; --border: rgba(255, 255, 255, 0.05); }
+            body { 
+                font-family: 'Inter', sans-serif; background: var(--bg); color: white; margin: 0; 
+                background-image: radial-gradient(circle at 50% -20%, #1e293b, var(--bg));
+                min-height: 100vh; display: flex; flex-direction: column;
+            }
             
-            .product-info h1 { font-size: 3rem; margin: 0; }
-            .badge { background: var(--primary); color: #000; padding: 5px 12px; border-radius: 20px; font-weight: 800; font-size: 0.7rem; }
+            .nav-header { padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); background: rgba(3, 7, 18, 0.5); backdrop-filter: blur(10px); }
+            .logo { font-weight: 800; font-size: 1.2rem; letter-spacing: -1px; color: white; text-decoration: none; }
+
+            .container { max-width: 1000px; margin: auto; padding: 40px 20px; display: grid; grid-template-columns: 1fr 400px; gap: 60px; align-items: center; }
             
-            .checkout-card { background: var(--card); border: 1px solid var(--border); padding: 30px; border-radius: 24px; position: sticky; top: 100px; }
-            .payment-methods { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 20px 0; }
-            .method { border: 1px solid #1e293b; padding: 15px; border-radius: 12px; cursor: pointer; text-align: center; transition: 0.3s; grayscale: 100%; opacity: 0.6; }
-            .method:hover, .method.active { border-color: var(--primary); grayscale: 0; opacity: 1; background: rgba(56, 189, 248, 0.05); }
-            .method img { width: 40px; height: 40px; object-fit: contain; margin-bottom: 5px; }
-            .method span { display: block; font-size: 0.7rem; font-weight: 700; }
+            .product-info h1 { font-size: 3.5rem; margin: 0; font-weight: 800; letter-spacing: -2px; }
+            .badge { background: rgba(56, 189, 248, 0.1); color: var(--primary); padding: 6px 16px; border-radius: 20px; font-weight: 800; font-size: 0.75rem; text-transform: uppercase; border: 1px solid rgba(56, 189, 248, 0.2); }
+            
+            .checkout-card { 
+                background: var(--card); border: 1px solid var(--border); padding: 40px; border-radius: 32px; 
+                box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); text-align: center;
+            }
+            
+            .price-tag { font-size: 3rem; font-weight: 800; margin: 10px 0; color: white; }
+            .price-tag span { font-size: 1rem; color: #4b5563; font-weight: 400; }
 
-            .payment-details { background: #000; padding: 20px; border-radius: 16px; margin-top: 20px; display: none; }
-            .qr-box { text-align: center; margin-bottom: 15px; }
-            .qr-box img { width: 150px; border-radius: 10px; }
+            .btn-tebex { 
+                background: white; color: black; width: 100%; padding: 18px; border: none; 
+                border-radius: 16px; font-weight: 800; cursor: pointer; margin-top: 20px; 
+                transition: 0.3s; font-size: 1rem; display: flex; align-items: center; justify-content: center; gap: 12px;
+            }
+            .btn-tebex:hover { background: var(--primary); color: white; transform: translateY(-3px); box-shadow: 0 10px 20px rgba(56, 189, 248, 0.2); }
+            
+            .trust-badges { margin-top: 30px; display: flex; justify-content: center; gap: 15px; opacity: 0.4; font-size: 1.5rem; }
 
-            .btn-verify { background: var(--primary); color: #000; width: 100%; padding: 15px; border: none; border-radius: 12px; font-weight: 800; cursor: pointer; margin-top: 10px; }
-            input { width: 100%; padding: 12px; border-radius: 8px; border: 1px solid #1e293b; background: #000; color: white; margin-bottom: 10px; box-sizing: border-box; }
-        
-        
-            /* Modal de Éxito (Licencia) */
+            /* Modal de Éxito */
             .success-modal { 
                 display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-                background: rgba(3, 7, 18, 0.9); backdrop-filter: blur(10px); 
+                background: rgba(3, 7, 18, 0.98); backdrop-filter: blur(15px); 
                 justify-content: center; align-items: center; z-index: 2000; 
             }
             .success-content { 
-                background: var(--card); padding: 40px; border-radius: 28px; border: 1px solid var(--primary); 
-                max-width: 450px; width: 90%; text-align: center; box-shadow: 0 0 50px rgba(56, 189, 248, 0.2); 
-                animation: slideUp 0.5s ease-out;
+                background: #111827; padding: 50px; border-radius: 32px; border: 1px solid var(--primary); 
+                max-width: 450px; width: 90%; text-align: center; animation: slideUp 0.4s ease-out;
             }
-            @keyframes slideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+            @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
 
             .license-display { 
-                background: #000; border: 1px dashed var(--primary); padding: 20px; 
-                border-radius: 12px; font-family: 'JetBrains Mono', monospace; 
-                font-size: 1.2rem; color: var(--primary); margin: 20px 0; 
+                background: #000; border: 1px dashed var(--primary); padding: 25px; 
+                border-radius: 16px; font-family: 'JetBrains Mono', monospace; 
+                font-size: 1.2rem; color: var(--primary); margin: 25px 0; 
                 display: flex; justify-content: space-between; align-items: center;
             }
-            .btn-copy { background: none; border: none; color: white; cursor: pointer; font-size: 1rem; }
+            .btn-copy { background: none; border: none; color: white; cursor: pointer; font-size: 1.3rem; transition: 0.2s; }
             .btn-copy:hover { color: var(--primary); }
 
-            .download-info { font-size: 0.8rem; color: #94a3b8; margin-top: 15px; }
-
-
-        
-            </style>
+            footer { text-align: center; padding: 40px; border-top: 1px solid var(--border); margin-top: auto; font-size: 0.8rem; color: #4b5563; }
+            footer a { color: #64748b; text-decoration: none; margin: 0 15px; transition: 0.2s; }
+            footer a:hover { color: white; }
+        </style>
     </head>
     <body>
+        <nav class="nav-header">
+            <a href="/stunbot/verify" class="logo"><i class="fas fa-bolt" style="color: var(--primary)"></i> STUNBOT<span style="color: var(--primary)">CLOUD</span></a>
+            <div>
+                <a href="/stunbot/docs" style="color: white; text-decoration: none; font-size: 0.9rem; font-weight: 600;">Documentación</a>
+            </div>
+        </nav>
+
         <div class="container">
             <div class="product-info">
-                <span class="badge">SISTEMA PRIVADO</span>
-                <h1>StunBot Pro License</h1>
-                <p style="color:#94a3b8; font-size: 1.2rem;">Licencia vitalicia con acceso a todos los módulos de automatización, encriptación AES-256 y soporte técnico 24/7.</p>
+                <span class="badge">Licencia Vitalicia</span>
+                <h1>StunBot Pro</h1>
+                <p style="color:#94a3b8; font-size: 1.25rem; line-height: 1.6; margin-top: 20px;">
+                    Acceda a la infraestructura de automatización de WhatsApp más potente. 
+                    Encriptación de grado militar, Hot-Reload y sistema de colas inteligente.
+                </p>
                 
-                <div style="margin-top:40px;">
-                    <h3 style="color:white;"><i class="fas fa-layer-group"></i> ¿Qué incluye?</h3>
-                    <ul style="color:#94a3b8; padding-left:20px;">
-                        <li>Protocolo Anti-Ban Baileys optimizado.</li>
-                        <li>Dashboard de estado y cambio de JID manual.</li>
-                        <li>Filtro de grupos y logs en tiempo real.</li>
-                    </ul>
+                <div style="margin-top:40px; display: grid; gap: 15px;">
+                    <div style="display:flex; align-items:center; gap:12px; color:#cbd5e1;">
+                        <i class="fas fa-check-circle" style="color:var(--success)"></i> <span>Protocolo Anti-Ban Baileys V6</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:12px; color:#cbd5e1;">
+                        <i class="fas fa-check-circle" style="color:var(--success)"></i> <span>Dashboard de Gestión de JID</span>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:12px; color:#cbd5e1;">
+                        <i class="fas fa-check-circle" style="color:var(--success)"></i> <span>Soporte Técnico Especializado</span>
+                    </div>
                 </div>
             </div>
 
             <div class="checkout-card">
-                <div style="font-size: 0.8rem; color: #64748b;">TOTAL A PAGAR</div>
-                <div style="font-size: 2.5rem; font-weight: 800;">$10.00 <span style="font-size: 1rem; color: #4b5563;">USD</span></div>
+                <div style="font-size: 0.75rem; color: #64748b; font-weight: 800; text-transform: uppercase; letter-spacing: 1px;">Pago Único</div>
+                <div class="price-tag">$10.00 <span>USD</span></div>
+                
+                <p style="color: #94a3b8; font-size: 0.85rem; margin: 20px 0;">
+                    La licencia se generará automáticamente tras validar el pago en el cluster.
+                </p>
 
-                <div class="payment-methods">
-                    <div class="method" id="m-paypal" onclick="selectMethod('paypal')">
-                        <img src="https://cdn-icons-png.flaticon.com/512/174/174861.png">
-                        <span>PayPal</span>
-                    </div>
-                    <div class="method" id="m-binance" onclick="selectMethod('binance')">
-                        <img src="https://cryptologos.cc/logos/binance-coin-bnb-logo.png">
-                        <span>Binance</span>
-                    </div>
-                    <div class="method" id="m-yape" onclick="selectMethod('yape')">
-                        <img src="https://upload.wikimedia.org/wikipedia/commons/d/d1/Yape_logo.png">
-                        <span>Yape</span>
-                    </div>
+                <button class="btn-tebex" onclick="startCheckout()">
+                    <i class="fas fa-shopping-cart"></i> ADQUIRIR LICENCIA AHORA
+                </button>
+
+                <div class="trust-badges">
+                    <i class="fab fa-cc-paypal"></i>
+                    <i class="fab fa-cc-visa"></i>
+                    <i class="fab fa-cc-mastercard"></i>
+                    <i class="fab fa-cc-apple-pay"></i>
+                    <i class="fab fa-bitcoin"></i>
+                </div>
+                <div style="font-size: 0.65rem; color: #4b5563; margin-top: 10px;">Procesado de forma segura por Tebex</div>
+            </div>
+        </div>
+
+        <!-- Modal de Éxito -->
+        <div id="successModal" class="success-modal">
+            <div class="success-content">
+                <i class="fas fa-shield-check" style="font-size: 4rem; color: var(--success); margin-bottom: 20px;"></i>
+                <h2 style="margin:0; font-weight: 800;">¡PAGO EXITOSO!</h2>
+                <p style="color: #94a3b8; margin-top: 10px;">Tu licencia profesional ha sido activada en el sistema.</p>
+                
+                <div class="license-display">
+                    <span id="finalLicense">GENERANDO...</span>
+                    <button class="btn-copy" onclick="copyLicense()" title="Copiar">
+                        <i class="fas fa-copy"></i>
+                    </button>
                 </div>
 
-                <!-- Contenedor dinámico según el pago -->
-                <div id="paypal-container" class="payment-details">
-                    <div id="paypal-button-container"></div>
-                </div>
-
-                <div id="manual-container" class="payment-details">
-                    <div class="qr-box">
-                        <img id="qr-img" src="">
-                        <p id="qr-text" style="font-size:0.8rem; margin-top:10px;"></p>
-                    </div>
-                    <input type="text" id="p_email" placeholder="Tu Email">
-                    <input type="text" id="p_ref" placeholder="Número de Operación / Ref">
-                    <button class="btn-verify" onclick="submitManual()">NOTIFICAR PAGO</button>
+                <button class="btn-tebex" style="background: var(--primary); color: white;" onclick="window.location.href='/stunbot/docs'">
+                    CONFIGURAR MI BOT
+                </button>
+                
+                <div style="font-size: 0.75rem; color: #4b5563; margin-top: 20px;">
+                    <i class="fas fa-info-circle"></i> Los archivos del bot se enviaron a tu correo.
                 </div>
             </div>
         </div>
 
+        <footer>
+            <span>&copy; 2025 StunBot Infrastructure Node</span>
+            <a href="/stunbot/verify">Estado</a>
+            <a href="/stunbot/docs">Soporte</a>
+        </footer>
 
-        <!-- Modal de Éxito -->
-<div id="successModal" class="success-modal">
-    <div class="success-content">
-        <i class="fas fa-check-circle" style="font-size: 4rem; color: var(--success); margin-bottom: 20px;"></i>
-        <h2 style="margin:0;">¡PAGO COMPLETADO!</h2>
-        <p style="color: #94a3b8;">Tu licencia ha sido generada con éxito. Guárdala en un lugar seguro.</p>
-        
-        <div class="license-display">
-            <span id="finalLicense">STUNBOT-XXXX-XXXX</span>
-            <button class="btn-copy" onclick="copyLicense()" title="Copiar Licencia">
-                <i class="fas fa-copy"></i>
-            </button>
-        </div>
-
-        <button class="btn-verify" onclick="window.location.href='/docs'">IR A LA DOCUMENTACIÓN</button>
-        
-        <div class="download-info">
-            <i class="fas fa-download"></i> Descargando archivos del bot automáticamente...
-        </div>
-    </div>
-</div>
-
-
-        <script src="https://www.paypal.com/sdk/js?client-id=AfPhvtfJzqyKy3Wqsfpl4c-IxTOfhiv9L434Q0yf5ZFnhSuZb8ZJLHubj5t71-mWI7vMtshHn71_Sk5M&currency=USD"></script>
         <script>
-    let currentMethod = '';
+            async function startCheckout() {
+                const btn = document.querySelector('.btn-tebex');
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> PROCESANDO...';
+                btn.disabled = true;
 
-    // Función para seleccionar el método de pago (Yape, Binance, PayPal)
-    function selectMethod(method) {
-        currentMethod = method;
-        document.querySelectorAll('.method').forEach(m => m.classList.remove('active'));
-        document.getElementById('m-' + method).classList.add('active');
-        
-        document.getElementById('paypal-container').style.display = 'none';
-        document.getElementById('manual-container').style.display = 'none';
-
-        if(method === 'paypal') {
-            document.getElementById('paypal-container').style.display = 'block';
-        } else {
-            document.getElementById('manual-container').style.display = 'block';
-            if(method === 'yape') {
-                document.getElementById('qr-img').src = 'URL_DE_TU_QR_YAPE';
-                document.getElementById('qr-text').innerText = 'Yapear a: 9XXXXXXXX (Tu Nombre)';
-            } else {
-                document.getElementById('qr-img').src = 'URL_DE_TU_QR_BINANCE';
-                document.getElementById('qr-text').innerText = 'Binance ID: 123456789';
-            }
-        }
-    }
-
-    // Lógica de PayPal (Botón Automático)
-    paypal.Buttons({
-        createOrder: (data, actions) => {
-            return actions.order.create({
-                purchase_units: [{ amount: { value: '10.00' } }]
-            });
-        },
-        onApprove: (data, actions) => {
-            return actions.order.capture().then(async (details) => {
-                const res = await fetch('/api/checkout/success', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ 
-                        method: 'paypal', 
-                        orderID: data.orderID, 
-                        email: details.payer.email_address 
-                    })
-                });
-                const result = await res.json();
-                if(result.success) {
-                    showSuccess(result.license);
+                try {
+                    const res = await fetch('/stunbot/create-checkout', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.url) {
+                        Tebex.checkout.open(data.url);
+                    } else {
+                        alert("Error al conectar con la pasarela.");
+                    }
+                } catch (e) {
+                    alert("Error de red. Intente de nuevo.");
+                } finally {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
                 }
-            });
-        }
-    }).render('#paypal-button-container');
+            }
 
-    // Función para mostrar el Modal de Éxito y descargar el Bot
-    function showSuccess(license) {
-        // Ocultar selectores de pago
-        document.getElementById('paypal-container').style.display = 'none';
-        document.getElementById('manual-container').style.display = 'none';
-        
-        // Mostrar Modal de éxito
-        document.getElementById('successModal').style.display = 'flex';
-        document.getElementById('finalLicense').innerText = license;
+            function copyLicense() {
+                const text = document.getElementById('finalLicense').innerText;
+                const showCheck = () => {
+                    const icon = document.querySelector('.btn-copy i');
+                    icon.className = 'fas fa-check'; icon.style.color = '#10b981';
+                    setTimeout(() => { icon.className = 'fas fa-copy'; icon.style.color = ''; }, 2000);
+                };
 
-        // Iniciar descarga automática
-        const downloadLink = document.createElement('a');
-        downloadLink.href = '/download/StunBot_V2.zip'; 
-        downloadLink.download = 'StunBot_V2.zip';
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
-    }
-
-    // Función para copiar la licencia al portapapeles
-    function copyLicense() {
-        const licenseText = document.getElementById('finalLicense').innerText;
-
-        // Intentar primero con el método moderno (requiere HTTPS)
-        if (navigator.clipboard && window.isSecureContext) {
-            navigator.clipboard.writeText(licenseText).then(() => {
-                showCheckIcon();
-            }).catch(() => {
-                fallbackCopy(licenseText); // Si falla, usar el método antiguo
-            });
-        } else {
-            // Método antiguo para conexiones no seguras (HTTP / IPs)
-            fallbackCopy(licenseText);
-        }
-    }
-
-    // Método de respaldo compatible con todo (Crea un campo de texto invisible, lo copia y lo borra)
-    function fallbackCopy(text) {
-        const textArea = document.createElement("textarea");
-        textArea.value = text;
-        
-        // Asegurarse de que no sea visible
-        textArea.style.position = "fixed";
-        textArea.style.left = "-9999px";
-        textArea.style.top = "0";
-        document.body.appendChild(textArea);
-        
-        textArea.select();
-        try {
-            document.execCommand('copy');
-            showCheckIcon();
-        } catch (err) {
-            alert('No se pudo copiar automáticamente. Por favor, selecciona el texto manualmente.');
-        }
-        document.body.removeChild(textArea);
-    }
-
-    // Función para cambiar el icono a un "check" verde
-    function showCheckIcon() {
-        const btnIcon = document.querySelector('.btn-copy i');
-        const originalClass = btnIcon.className;
-        
-        btnIcon.className = 'fas fa-check';
-        btnIcon.style.color = '#10b981'; // Color verde éxito
-        
-        setTimeout(() => {
-            btnIcon.className = originalClass;
-            btnIcon.style.color = ''; // Volver al color original
-        }, 2000);
-    }
-
-    // Lógica para pagos manuales (Yape/Binance)
-    async function submitManual() {
-        const email = document.getElementById('p_email').value;
-        const ref = document.getElementById('p_ref').value;
-        if(!email || !ref) return alert('Completa los datos');
-
-        const res = await fetch('/api/checkout/manual', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ method: currentMethod, email, reference: ref })
-        });
-        alert('Pago enviado a revisión. Te contactaremos al email.');
-    }
-</script>
+                if (navigator.clipboard && window.isSecureContext) {
+                    navigator.clipboard.writeText(text).then(showCheck);
+                } else {
+                    const area = document.createElement("textarea");
+                    area.value = text; document.body.appendChild(area);
+                    area.select(); document.execCommand('copy');
+                    document.body.removeChild(area);
+                    showCheck();
+                }
+            }
+        </script>
     </body>
     </html>
     `;
