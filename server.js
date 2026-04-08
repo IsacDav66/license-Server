@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path'); 
 const crypto = require('crypto');
 const axios = require('axios');
+const Tebex = require('@tebexio/tebex-sdk-nodejs');
 
 // Vistas Modularizadas
 const { renderStore } = require('./views/store');
@@ -22,17 +23,38 @@ const pool = new Pool({
 app.use(express.json());
 
 // --- ENDPOINTS DE TEBEX (MODAL HYTALE) ---
+// Configuramos el cliente de Tebex
+const tebexClient = new Tebex.CheckoutClient(
+    process.env.TEBEX_PROJECT_ID,
+    process.env.TEBEX_PRIVATE_KEY
+);
+
 app.post('/create-checkout', async (req, res) => {
     try {
-        const response = await axios.post('https://checkout.tebex.io/api/checkouts', {
-            package_id: 7383010, // <--- TU ID DE PAQUETE
-            type: 'single'
-        }, {
-            headers: { 'X-Tebex-Secret': process.env.TEBEX_PRIVATE_KEY, 'Content-Type': 'application/json' }
+        // Usamos el SDK para crear el carrito y la sesión
+        // 1. Creamos un "basket" (carrito)
+        const basket = await tebexClient.createBasket({
+            complete_url: "https://davcenter.servequake.com/stunbot/verify?success=true",
+            cancel_url: "https://davcenter.servequake.com/stunbot/store"
         });
-        res.json({ url: response.data.links.checkout });
-    } catch (error) { res.status(500).json({ error: "Error Tebex" }); }
+
+        // 2. Añadimos tu paquete de $10 al carrito
+        await tebexClient.addPackageToBasket(basket.ident, {
+            package_id: 6639511 // <--- ASEGÚRATE QUE ESTE ID SEA EL TUYO
+        });
+
+        // 3. Obtenemos el link de pago para el modal
+        const authUrl = await tebexClient.getBasketAuthUrl(basket.ident);
+
+        // Enviamos la URL al frontend (store.js)
+        res.json({ url: authUrl });
+
+    } catch (error) {
+        console.error("Error oficial de Tebex SDK:", error);
+        res.status(500).json({ error: "No se pudo iniciar la pasarela oficial" });
+    }
 });
+
 
 app.post('/tebex-webhook', async (req, res) => {
     const data = req.body;
