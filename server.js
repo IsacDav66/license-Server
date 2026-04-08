@@ -25,7 +25,7 @@ app.use(express.json());
 app.post('/create-checkout', async (req, res) => {
     try {
         const response = await axios.post('https://checkout.tebex.io/api/checkouts', {
-            package_id: 6639511, // <--- TU ID DE PAQUETE
+            package_id: 7383010, // <--- TU ID DE PAQUETE
             type: 'single'
         }, {
             headers: { 'X-Tebex-Secret': process.env.TEBEX_PRIVATE_KEY, 'Content-Type': 'application/json' }
