@@ -27,29 +27,49 @@ app.use(express.json());
 // ==========================================
 app.post('/create-checkout', async (req, res) => {
     try {
-        console.log("--- Iniciando Checkout API (Tebex) ---");
-        
-        const response = await axios.post('https://checkout.tebex.io/api/checkouts', {
-            package_id: 7383010, // Tu ID de paquete real
-            type: 'single',
-            complete_url: "https://davcenter.servequake.com/stunbot/verify?success=true",
-            cancel_url: "https://davcenter.servequake.com/stunbot/store"
+        console.log("--- Iniciando Checkout API (Protocolo Estricto) ---");
+
+        // Según tu captura 2: Autenticación Basic (btoa(ProjectID : PrivateKey))
+        const authString = Buffer.from(`${process.env.TEBEX_PROJECT_ID}:${process.env.TEBEX_PRIVATE_KEY}`).toString('base64');
+
+        // Según tu captura 1: El cuerpo debe tener 'basket' e 'items'
+        const response = await axios.post('https://checkout.tebex.io/api/checkout', {
+            basket: {
+                first_name: "Cliente",
+                last_name: "StunBot",
+                email: "customer@example.com", // Esto lo llenará el usuario en el modal
+                complete_url: "https://davcenter.servequake.com/stunbot/verify?success=true",
+                cancel_url: "https://davcenter.servequake.com/stunbot/store"
+            },
+            items: [
+                {
+                    package_id: 7383010, // Tu ID de paquete real
+                    qty: 1
+                }
+            ],
+            sale: {
+                type: "single"
+            }
         }, {
             headers: {
-                'X-Tebex-Secret': process.env.TEBEX_PRIVATE_KEY, // Private Key (v4L4...)
+                'Authorization': `Basic ${authString}`,
                 'Content-Type': 'application/json'
             }
         });
 
-        console.log("✅ Sesión Tebex Creada");
+        console.log("✅ Sesión Tebex Creada con éxito");
+        // Según tu captura 1: La URL está en data.links.checkout
         res.json({ url: response.data.links.checkout });
 
     } catch (error) {
+        console.error("❌ Error Tebex API Detallado:");
         if (error.response) {
-            console.error("❌ Error API Tebex:", error.response.status, error.response.data);
-            res.status(error.response.status).json({ error: "No se pudo iniciar el pago" });
+            // Esto nos dirá exactamente qué campo del JSON está mal
+            console.error("Status:", error.response.status);
+            console.error("Data:", JSON.stringify(error.response.data));
+            res.status(error.response.status).json(error.response.data);
         } else {
-            console.error("❌ Error Red:", error.message);
+            console.error("Mensaje:", error.message);
             res.status(500).json({ error: "Error de conexión" });
         }
     }
