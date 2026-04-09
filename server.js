@@ -27,53 +27,39 @@ app.use(express.json());
 // ==========================================
 app.post('/create-checkout', async (req, res) => {
     try {
-        console.log("--- Iniciando Checkout API (Auth Nativo) ---");
+        console.log("--- Iniciando Flujo de Canasta (Tebex Option 2) ---");
 
-        // Limpiamos las variables por si acaso tienen espacios en el .env
-        const username = process.env.TEBEX_PROJECT_ID.trim();
-        const password = process.env.TEBEX_PRIVATE_KEY.trim();
+        const auth = {
+            username: process.env.TEBEX_PROJECT_ID.trim(),
+            password: process.env.TEBEX_PRIVATE_KEY.trim()
+        };
 
-        const response = await axios.post('https://checkout.tebex.io/api/checkout', {
-            basket: {
-                first_name: "Cliente",
-                last_name: "StunBot",
-                email: "customer@example.com", 
-                complete_url: "https://davcenter.servequake.com/stunbot/verify?success=true",
-                cancel_url: "https://davcenter.servequake.com/stunbot/store"
-            },
-            items: [
-                {
-                    package_id: 7383010, // Tu ID de paquete
-                    qty: 1
-                }
-            ],
-            sale: {
-                type: "single"
-            }
-        }, {
-            // USAMOS EL MÉTODO NATIVO DE AXIOS PARA BASIC AUTH
-            auth: {
-                username: username,
-                password: password
-            },
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
+        // PASO 1: Crear la canasta (Basket)
+        const basketResponse = await axios.post('https://checkout.tebex.io/api/baskets', {
+            complete_url: "https://davcenter.servequake.com/stunbot/verify?success=true",
+            cancel_url: "https://davcenter.servequake.com/stunbot/store"
+        }, { auth });
 
-        console.log("✅ Sesión Tebex Creada exitosamente");
-        res.json({ url: response.data.links.checkout });
+        const basketIdent = basketResponse.data.data.ident;
+        console.log("✅ Canasta creada:", basketIdent);
+
+        // PASO 2: Añadir el paquete a la canasta
+        await axios.post(`https://checkout.tebex.io/api/baskets/${basketIdent}/packages`, {
+            package_id: 7383010,
+            qty: 1
+        }, { auth });
+
+        console.log("✅ Paquete añadido a la canasta");
+
+        // PASO 3: Devolver la URL de checkout
+        // Según tu captura, la URL está en basketResponse.data.data.links.checkout
+        res.json({ url: basketResponse.data.data.links.checkout });
 
     } catch (error) {
-        console.error("❌ Error Tebex API Detallado:");
+        console.error("❌ Error en el flujo de Canasta:");
         if (error.response) {
             console.error("Status:", error.response.status);
             console.error("Data:", JSON.stringify(error.response.data));
-            
-            // Si el error es 401, imprimimos una advertencia clara
-            if(error.response.status === 401) {
-                console.warn("⚠️ ALERTA: Las credenciales en el .env no son válidas para la Checkout API.");
-            }
             res.status(error.response.status).json(error.response.data);
         } else {
             console.error("Mensaje:", error.message);
