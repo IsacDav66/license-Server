@@ -25,7 +25,7 @@ app.use(express.json());
 // ==========================================
 // 1. TEBEX - CREAR SESIÓN DE PAGO (MODAL)
 // ==========================================
-app.post('/create-checkout', async (req, res) => {
+app.post('/stunbot/create-checkout', async (req, res) => {
     try {
         console.log("--- Iniciando Flujo de Canasta (Tebex Option 2) ---");
 
@@ -71,7 +71,7 @@ app.post('/create-checkout', async (req, res) => {
 // ==========================================
 // 2. TEBEX - WEBHOOK (ENTREGA DE LICENCIA)
 // ==========================================
-app.post('/tebex-webhook', async (req, res) => {
+app.post('/stunbot/tebex-webhook', async (req, res) => {
     const data = req.body;
 
     // Validación de Tebex
@@ -123,9 +123,9 @@ app.post('/tebex-webhook', async (req, res) => {
 // ==========================================
 // 3. RUTAS DE NAVEGACIÓN
 // ==========================================
-app.get('/store', (req, res) => res.send(renderStore()));
-app.get('/docs', (req, res) => res.send(renderDocs()));
-app.get('/verify', async (req, res) => {
+app.get('/stunbot/store', (req, res) => res.send(renderStore()));
+app.get('/stunbot/docs', (req, res) => res.send(renderDocs()));
+app.get('/stunbot/verify', async (req, res) => {
     const uptimeSeconds = Math.floor(process.uptime());
     const hours = Math.floor(uptimeSeconds / 3600);
     const minutes = Math.floor((uptimeSeconds % 3600) / 60);
@@ -140,7 +140,8 @@ app.get('/verify', async (req, res) => {
 // ==========================================
 // 4. API - VERIFICACIÓN Y GESTIÓN
 // ==========================================
-app.post('/verify', async (req, res) => {
+// 1. Verificación de Licencia
+app.post('/stunbot/verify', async (req, res) => {
     const { license_key } = req.body;
     try {
         const result = await pool.query('SELECT whatsapp_jid, is_active, ignored_groups FROM licenses WHERE license_key = $1', [license_key]);
@@ -153,7 +154,29 @@ app.post('/verify', async (req, res) => {
     } catch (e) { res.status(500).json({ valid: false }); }
 });
 
-app.post('/change-jid', async (req, res) => {
+// 2. Recuperar por Email (ESTA ES LA QUE TE DABA 404)
+app.post('/stunbot/find-licenses', async (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ valid: false, message: 'Email requerido.' });
+
+    try {
+        const result = await pool.query(
+            'SELECT license_key, whatsapp_jid, is_active FROM licenses WHERE client_name = $1 ORDER BY created_at DESC',
+            [email.trim()]
+        );
+
+        if (result.rows.length > 0) {
+            return res.json({ success: true, licenses: result.rows });
+        } else {
+            return res.status(404).json({ success: false, message: 'No se encontraron licencias.' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error interno.' });
+    }
+});
+
+// 3. Cambio de JID
+app.post('/stunbot/change-jid', async (req, res) => {
     const { license_key, new_jid } = req.body;
     let formattedJid = new_jid.includes('@') ? new_jid : `${new_jid}@s.whatsapp.net`;
     try {
@@ -164,11 +187,11 @@ app.post('/change-jid', async (req, res) => {
     } catch (e) { res.status(500).json({ valid: false }); }
 });
 
-app.get('/api/comments', async (req, res) => {
+app.get('/stunbot/api/comments', async (req, res) => {
     const result = await pool.query('SELECT name, content FROM comments ORDER BY created_at DESC LIMIT 10');
     res.json(result.rows);
 });
-app.post('/api/comments', async (req, res) => {
+app.post('/stunbot/api/comments', async (req, res) => {
     await pool.query('INSERT INTO comments (name, content) VALUES ($1, $2)', [req.body.name, req.body.content]);
     res.json({ success: true });
 });
