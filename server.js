@@ -26,27 +26,26 @@ app.use(express.json());
 
 app.post('/create-checkout', async (req, res) => {
     try {
-        console.log("--- Iniciando creación de Checkout con Tebex ---");
-
-        // Hacemos la petición directa a la API de Tebex
+        console.log("--- Iniciando creación de Checkout ---");
+        
         const response = await axios.post('https://checkout.tebex.io/api/checkouts', {
-            package_id: 7383010, // <--- REVISA QUE ESTE SEA TU ID REAL
-            type: 'single'
+            package_id: 7383010, // <--- ✅ ESTE ES TU ID REAL
+            type: 'single',
+            complete_url: "https://davcenter.servequake.com/stunbot/verify?success=true",
+            cancel_url: "https://davcenter.servequake.com/stunbot/store"
         }, {
             headers: {
-                'X-Tebex-Secret': process.env.TEBEX_PRIVATE_KEY, // Tu llave v4L4...
+                'X-Tebex-Secret': process.env.TEBEX_PRIVATE_KEY, // Asegúrate que sea la Private Key (v4L4...)
                 'Content-Type': 'application/json'
             }
         });
 
-        console.log("✅ Sesión de pago generada correctamente");
-
-        // Enviamos la URL al frontend para que se abra el modal
+        console.log("✅ Sesión de Tebex creada con éxito");
         res.json({ url: response.data.links.checkout });
 
     } catch (error) {
         if (error.response) {
-            console.error("❌ Error de Tebex:", error.response.status, error.response.data);
+            console.error("❌ Error de Tebex API:", error.response.status, JSON.stringify(error.response.data));
             res.status(error.response.status).json({ error: error.response.data });
         } else {
             console.error("❌ Error de red:", error.message);
@@ -54,7 +53,6 @@ app.post('/create-checkout', async (req, res) => {
         }
     }
 });
-
 
 app.post('/tebex-webhook', async (req, res) => {
     const data = req.body;
