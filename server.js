@@ -30,7 +30,7 @@ app.post('/create-checkout', async (req, res) => {
 
         // Hacemos la petición directa a la API de Tebex
         const response = await axios.post('https://checkout.tebex.io/api/checkouts', {
-            package_id: 6639511, // <--- REVISA QUE ESTE SEA TU ID REAL
+            package_id: 7383010, // <--- REVISA QUE ESTE SEA TU ID REAL
             type: 'single'
         }, {
             headers: {
