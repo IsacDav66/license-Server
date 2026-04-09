@@ -11,24 +11,28 @@ const renderStore = () => {
         <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
         
-        <!-- SDK de Tebex (Indispensable para el Modal estilo Hytale) -->
+        <!-- SDK de Tebex (Modal Hytale) -->
         <script src="https://js.tebex.io/"></script>
 
         <style>
             :root { --bg: #030712; --card: #0f172a; --primary: #38bdf8; --success: #10b981; --border: rgba(255, 255, 255, 0.05); }
+            
             body { 
                 font-family: 'Inter', sans-serif; background: var(--bg); color: white; margin: 0; 
                 background-image: radial-gradient(circle at 50% -20%, #1e293b, var(--bg));
                 min-height: 100vh; display: flex; flex-direction: column;
             }
             
-            .nav-header { padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); background: rgba(3, 7, 18, 0.5); backdrop-filter: blur(10px); }
-            .logo { font-weight: 800; font-size: 1.2rem; letter-spacing: -1px; color: white; text-decoration: none; display: flex; align-items: center; gap: 10px; }
+            .nav-header { padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); background: rgba(3, 7, 18, 0.5); backdrop-filter: blur(10px); z-index: 100; }
+            .logo { font-weight: 800; font-size: 1.2rem; letter-spacing: -1px; color: white; text-decoration: none; }
 
-            .container { max-width: 1000px; margin: auto; padding: 40px 20px; display: grid; grid-template-columns: 1fr 400px; gap: 60px; align-items: center; }
+            .container { 
+                max-width: 1000px; margin: auto; padding: 40px 20px; 
+                display: grid; grid-template-columns: 1fr 400px; gap: 60px; align-items: center; 
+            }
             
-            .product-info h1 { font-size: 3.5rem; margin: 0; font-weight: 800; letter-spacing: -2px; }
-            .badge { background: rgba(56, 189, 248, 0.1); color: var(--primary); padding: 6px 16px; border-radius: 20px; font-weight: 800; font-size: 0.75rem; text-transform: uppercase; border: 1px solid rgba(56, 189, 248, 0.2); }
+            .product-info h1 { font-size: 3.5rem; margin: 0; font-weight: 800; letter-spacing: -2px; line-height: 1.1; }
+            .badge { display: inline-block; background: rgba(56, 189, 248, 0.1); color: var(--primary); padding: 6px 16px; border-radius: 20px; font-weight: 800; font-size: 0.75rem; text-transform: uppercase; border: 1px solid rgba(56, 189, 248, 0.2); margin-bottom: 15px; }
             
             .checkout-card { 
                 background: var(--card); border: 1px solid var(--border); padding: 40px; border-radius: 32px; 
@@ -42,6 +46,7 @@ const renderStore = () => {
                 background: white; color: black; width: 100%; padding: 18px; border: none; 
                 border-radius: 16px; font-weight: 800; cursor: pointer; margin-top: 20px; 
                 transition: 0.3s; font-size: 1rem; display: flex; align-items: center; justify-content: center; gap: 12px;
+                text-decoration: none;
             }
             .btn-tebex:hover { background: var(--primary); color: white; transform: translateY(-3px); box-shadow: 0 10px 20px rgba(56, 189, 248, 0.2); }
             
@@ -71,13 +76,37 @@ const renderStore = () => {
             footer { text-align: center; padding: 40px; border-top: 1px solid var(--border); margin-top: auto; font-size: 0.8rem; color: #4b5563; }
             footer a { color: #64748b; text-decoration: none; margin: 0 15px; transition: 0.2s; }
             footer a:hover { color: white; }
+
+            /* ==========================================
+               RESPONSIVE DESIGN (MÓVILES Y TABLETS)
+            ========================================== */
+            @media (max-width: 992px) {
+                .container { 
+                    grid-template-columns: 1fr; 
+                    text-align: center; 
+                    gap: 40px;
+                    padding-top: 100px;
+                }
+                .product-info h1 { font-size: 2.8rem; }
+                .checkout-card { margin: auto; width: 100%; max-width: 450px; box-sizing: border-box; }
+                .product-info div { justify-content: center; } /* Centrar lista de beneficios */
+            }
+
+            @media (max-width: 600px) {
+                .nav-header { padding: 15px 20px; }
+                .product-info h1 { font-size: 2.2rem; }
+                .price-tag { font-size: 2.5rem; }
+                .success-content { padding: 30px 20px; }
+                .license-display { font-size: 1rem; padding: 15px; }
+                footer { display: flex; flex-direction: column; gap: 15px; }
+            }
         </style>
     </head>
     <body>
         <nav class="nav-header">
             <a href="/stunbot/verify" class="logo"><i class="fas fa-bolt" style="color: var(--primary)"></i> STUNBOT<span style="color: var(--primary)">CLOUD</span></a>
             <div>
-                <a href="/stunbot/docs" style="color: white; text-decoration: none; font-size: 0.9rem; font-weight: 600;">Documentación</a>
+                <a href="/stunbot/docs" style="color: white; text-decoration: none; font-size: 0.9rem; font-weight: 600;">Docs</a>
             </div>
         </nav>
 
@@ -85,7 +114,7 @@ const renderStore = () => {
             <div class="product-info">
                 <span class="badge">Licencia Vitalicia</span>
                 <h1>StunBot Pro</h1>
-                <p style="color:#94a3b8; font-size: 1.25rem; line-height: 1.6; margin-top: 20px;">
+                <p style="color:#94a3b8; font-size: 1.15rem; line-height: 1.6; margin-top: 20px;">
                     Acceda a la infraestructura de automatización de WhatsApp más potente. 
                     Encriptación de grado militar, Hot-Reload y sistema de colas inteligente.
                 </p>
@@ -152,8 +181,10 @@ const renderStore = () => {
 
         <footer>
             <span>&copy; 2025 StunBot Infrastructure Node</span>
-            <a href="/stunbot/verify">Estado</a>
-            <a href="/stunbot/docs">Soporte</a>
+            <div style="margin-top: 10px;">
+                <a href="/stunbot/verify">Estado</a>
+                <a href="/stunbot/docs">Soporte</a>
+            </div>
         </footer>
 
         <script>
@@ -164,15 +195,12 @@ const renderStore = () => {
                 btn.disabled = true;
 
                 try {
-                    // El fetch usa la subruta /stunbot/ definida en Nginx
                     const res = await fetch('/stunbot/create-checkout', { method: 'POST' });
                     const data = await res.json();
-                    
                     if (data.url) {
-                        // LA MAGIA: Abrir el modal nativo de Tebex
                         Tebex.checkout.open(data.url);
                     } else {
-                        alert("Error al conectar con la pasarela. Verifique el estado de la tienda.");
+                        alert("Error al conectar con la pasarela.");
                     }
                 } catch (e) {
                     alert("Error de red. Intente de nuevo.");

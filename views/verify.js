@@ -10,13 +10,30 @@ const renderVerify = (data) => {
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
         <style>
             :root { --bg: #030712; --card: rgba(17, 24, 39, 0.7); --primary: #38bdf8; --success: #10b981; --error: #ef4444; --border: rgba(255, 255, 255, 0.1); }
-            body { font-family: 'Inter', sans-serif; background: var(--bg); background-image: radial-gradient(circle at 50% -20%, #1e293b, var(--bg)); color: white; margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
             
-            .nav-header { position: absolute; top: 0; width: 100%; padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; box-sizing: border-box; border-bottom: 1px solid var(--border); background: rgba(3, 7, 18, 0.5); backdrop-filter: blur(10px); z-index: 10; }
-            .logo { font-weight: 800; font-size: 1.2rem; letter-spacing: -1px; display: flex; align-items: center; gap: 8px; color: white; text-decoration: none; }
+            body { 
+                font-family: 'Inter', sans-serif; background: var(--bg); 
+                background-image: radial-gradient(circle at 50% -20%, #1e293b, var(--bg)); 
+                color: white; margin: 0; min-height: 100vh; display: flex; flex-direction: column; 
+                align-items: center; justify-content: center;
+            }
+            
+            /* Header Responsive */
+            .nav-header { 
+                position: absolute; top: 0; width: 100%; padding: 20px 40px; 
+                display: flex; justify-content: space-between; align-items: center; 
+                box-sizing: border-box; border-bottom: 1px solid var(--border); 
+                background: rgba(3, 7, 18, 0.5); backdrop-filter: blur(10px); z-index: 10; 
+            }
+            .logo { font-weight: 800; font-size: 1.2rem; letter-spacing: -1px; color: white; text-decoration: none; }
             .system-time { font-family: monospace; color: var(--primary); font-size: 0.9rem; background: rgba(56, 189, 248, 0.1); padding: 4px 12px; border-radius: 20px; border: 1px solid rgba(56, 189, 248, 0.2); }
 
-            .main-card { background: var(--card); backdrop-filter: blur(12px); padding: 40px; border-radius: 24px; width: 100%; max-width: 480px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); border: 1px solid var(--border); text-align: center; z-index: 5; }
+            /* Card Responsive */
+            .main-card { 
+                background: var(--card); backdrop-filter: blur(12px); padding: 40px; border-radius: 24px; 
+                width: 90%; max-width: 480px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5); 
+                border: 1px solid var(--border); text-align: center; z-index: 5; margin: 80px 0;
+            }
             
             .status-dots { display: flex; justify-content: center; gap: 15px; margin-bottom: 25px; font-size: 0.8rem; color: #94a3b8; }
             .dot-item { display: flex; align-items: center; gap: 6px; }
@@ -25,11 +42,10 @@ const renderVerify = (data) => {
 
             h1 { font-size: 2rem; font-weight: 800; margin: 0 0 10px 0; letter-spacing: -1px; }
 
-            /* --- VELAS INTERACTIVAS --- */
+            /* Velas Interactivas */
             .uptime-timeline { display: flex; gap: 4px; margin: 20px 0; justify-content: center; align-items: flex-end; height: 25px; }
             .bar { width: 5px; height: 18px; background: var(--success); border-radius: 10px; transition: all 0.3s ease; cursor: pointer; }
             .bar.active { background: var(--success); box-shadow: 0 0 5px rgba(16, 185, 129, 0.4); }
-            /* Animación al pasar el mouse */
             .bar:hover { height: 25px; background: var(--primary); box-shadow: 0 0 10px var(--primary); }
 
             input { width: 100%; padding: 14px 18px; border-radius: 12px; border: 1px solid var(--border); background: rgba(0,0,0,0.4); color: white; font-size: 1rem; margin-bottom: 15px; box-sizing: border-box; text-align: center; outline: none; }
@@ -37,20 +53,36 @@ const renderVerify = (data) => {
             button { width: 100%; padding: 14px; border-radius: 12px; border: none; background: white; color: black; font-weight: 700; cursor: pointer; transition: 0.2s; }
             button:hover { background: var(--primary); color: white; transform: translateY(-2px); }
 
-            /* ESTILO DEL LINK (Corregido) */
             .link-btn { background: none !important; border: none; color: #64748b; font-size: 0.75rem; cursor: pointer; text-decoration: underline; margin-top: 15px; width: 100%; display: block; box-shadow: none !important; transform: none !important; transition: color 0.2s; }
             .link-btn:hover { color: var(--primary) !important; background: none !important; }
 
-            .stats-info { margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; text-align: left; border-top: 1px solid var(--border); padding-top: 25px; }
+            /* Stats Grid Responsive */
+            .stats-info { 
+                margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 20px; 
+                text-align: left; border-top: 1px solid var(--border); padding-top: 25px; 
+            }
             .label { font-size: 0.65rem; color: #64748b; text-transform: uppercase; font-weight: 800; }
             .value { font-size: 0.85rem; color: #f1f5f9; font-family: monospace; }
 
-            #result { margin-top: 20px; padding: 15px; border-radius: 12px; display: none; font-size: 0.85rem; font-weight: 600; text-align: left; }
+            #result { margin-top: 20px; padding: 15px; border-radius: 12px; display: none; font-size: 0.85rem; font-weight: 600; text-align: left; word-break: break-all; }
             .active-res { background: rgba(16, 185, 129, 0.1); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.2); }
             .inactive-res { background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2); }
 
-            footer { position: absolute; bottom: 30px; color: #4b5563; font-size: 0.75rem; display: flex; gap: 25px; }
+            footer { padding: 40px; color: #4b5563; font-size: 0.75rem; display: flex; gap: 25px; flex-wrap: wrap; justify-content: center; }
             footer a { color: #64748b; text-decoration: none; }
+
+            /* ==========================================
+               MEDIA QUERIES (Móviles)
+            ========================================== */
+            @media (max-width: 600px) {
+                .nav-header { padding: 15px 20px; flex-direction: column; gap: 10px; height: auto; }
+                .main-card { padding: 25px 20px; width: 92%; margin-top: 120px; }
+                h1 { font-size: 1.6rem; }
+                .stats-info { grid-template-columns: 1fr; gap: 15px; }
+                .uptime-timeline { gap: 3px; }
+                .bar { width: 4px; }
+                footer { flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+            }
         </style>
     </head>
     <body>
@@ -96,8 +128,10 @@ const renderVerify = (data) => {
 
         <footer>
             <span>&copy; 2025 StunBot Infrastructure</span>
-            <a href="/stunbot/docs">Manual de Uso</a>
-            <a href="/stunbot/store">Tienda</a>
+            <div style="display:flex; gap:20px;">
+                <a href="/stunbot/docs">Manual de Uso</a>
+                <a href="/stunbot/store">Tienda</a>
+            </div>
         </footer>
 
         <script>
@@ -118,7 +152,7 @@ const renderVerify = (data) => {
                 const resDiv = document.getElementById('result');
                 const pingVal = document.getElementById('pingValue');
                 if(!key) return;
-                resDiv.style.display = 'block'; resDiv.innerHTML = 'INTERROGATING...'; resDiv.className = '';
+                resDiv.style.display = 'block'; resDiv.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> INTERROGATING...'; resDiv.className = '';
                 const start = performance.now();
                 try {
                     const response = await fetch('/stunbot/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ license_key: key }) });
@@ -141,7 +175,8 @@ const renderVerify = (data) => {
                         resDiv.className = 'active-res';
                         resDiv.innerHTML = '<b>CLAVES ENCONTRADAS:</b><br>' + data.licenses.map(l => \`<div style="margin-top:5px; border-top:1px solid rgba(0,0,0,0.1);">\${l.license_key}</div>\`).join('');
                     } else {
-                        resDiv.className = 'inactive-res'; resDiv.innerHTML = data.message.toUpperCase();
+                        resDiv.className = 'inactive-res';
+                        resDiv.innerHTML = data.message.toUpperCase();
                     }
                 } catch (e) { resDiv.className = 'inactive-res'; resDiv.innerHTML = 'ERROR DE RED'; }
             }
