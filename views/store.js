@@ -50,6 +50,19 @@ const renderStore = () => {
             }
             .btn-tebex:hover { background: var(--primary); color: white; transform: translateY(-3px); box-shadow: 0 10px 20px rgba(56, 189, 248, 0.2); }
             
+            /* Botón Secundario para Marketplace */
+            .btn-secondary {
+                background: transparent;
+                color: white;
+                border: 1px solid rgba(255,255,255,0.1);
+                margin-top: 10px;
+            }
+            .btn-secondary:hover {
+                background: rgba(255,255,255,0.05);
+                border-color: var(--primary);
+                box-shadow: none;
+            }
+
             .trust-badges { margin-top: 30px; display: flex; justify-content: center; gap: 15px; opacity: 0.4; font-size: 1.5rem; }
 
             /* Modal de Éxito */
@@ -89,11 +102,12 @@ const renderStore = () => {
                 }
                 .product-info h1 { font-size: 2.8rem; }
                 .checkout-card { margin: auto; width: 100%; max-width: 450px; box-sizing: border-box; }
-                .product-info div { justify-content: center; } /* Centrar lista de beneficios */
+                .product-info div { justify-content: center; } 
             }
 
             @media (max-width: 600px) {
                 .nav-header { padding: 15px 20px; }
+                .nav-header div { display: flex; gap: 10px; }
                 .product-info h1 { font-size: 2.2rem; }
                 .price-tag { font-size: 2.5rem; }
                 .success-content { padding: 30px 20px; }
@@ -106,6 +120,7 @@ const renderStore = () => {
         <nav class="nav-header">
             <a href="/stunbot/verify" class="logo"><i class="fas fa-bolt" style="color: var(--primary)"></i> STUNBOT<span style="color: var(--primary)">CLOUD</span></a>
             <div>
+                <a href="/stunbot/marketplace" style="color: var(--primary); text-decoration: none; font-size: 0.9rem; font-weight: 600; margin-right: 15px;"><i class="fas fa-shopping-bag"></i> Marketplace</a>
                 <a href="/stunbot/docs" style="color: white; text-decoration: none; font-size: 0.9rem; font-weight: 600;">Docs</a>
             </div>
         </nav>
@@ -142,6 +157,10 @@ const renderStore = () => {
 
                 <button class="btn-tebex" onclick="startCheckout()">
                     <i class="fas fa-shopping-cart"></i> ADQUIRIR LICENCIA AHORA
+                </button>
+
+                <button class="btn-tebex btn-secondary" onclick="window.location.href='/stunbot/marketplace'">
+                    <i class="fas fa-plug"></i> VER PLUGINS DISPONIBLES
                 </button>
 
                 <div class="trust-badges">
@@ -183,6 +202,7 @@ const renderStore = () => {
             <span>&copy; 2025 StunBot Infrastructure Node</span>
             <div style="margin-top: 10px;">
                 <a href="/stunbot/verify">Estado</a>
+                <a href="/stunbot/marketplace">Marketplace</a>
                 <a href="/stunbot/docs">Soporte</a>
             </div>
         </footer>
@@ -200,7 +220,7 @@ const renderStore = () => {
                     if (data.url) {
                         Tebex.checkout.open(data.url);
                     } else {
-                        alert("Error al conectar con la pasarela.");
+                        alert("Error al conectar con la pasarela. Verifique el estado de la tienda.");
                     }
                 } catch (e) {
                     alert("Error de red. Intente de nuevo.");

@@ -10,6 +10,7 @@ const axios = require('axios');
 const { renderStore } = require('./views/store');
 const { renderVerify } = require('./views/verify');
 const { renderDocs } = require('./views/docs');
+const { renderMarketplace } = require('./views/marketplace'); // <--- AÑADE ESTA LÍNEA
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -68,57 +69,102 @@ app.post('/stunbot/create-checkout', async (req, res) => {
     }
 });
 
+
+
+// Función para escanear plugins de la tienda
+const getMarketplacePlugins = () => {
+    const pluginsDir = path.join(__dirname, 'marketplace_plugins');
+    if (!fs.existsSync(pluginsDir)) return [];
+
+    const files = fs.readdirSync(pluginsDir);
+    const pluginsList = [];
+
+    files.forEach(file => {
+        if (file.endsWith('.js')) {
+            try {
+                const content = fs.readFileSync(path.join(pluginsDir, file), 'utf8');
+                const startTag = "marketplace:";
+                const startIndex = content.indexOf(startTag);
+                
+                if (startIndex !== -1) {
+                    let braceCount = 0, objectStr = "", started = false;
+                    for (let i = startIndex + startTag.length; i < content.length; i++) {
+                        const char = content[i];
+                        if (char === '{') { braceCount++; started = true; }
+                        if (char === '}') braceCount--;
+                        if (started) objectStr += char;
+                        if (started && braceCount === 0) break;
+                    }
+
+                    if (objectStr) {
+                        const marketplaceData = eval("(" + objectStr + ")");
+                        const nameMatch = content.match(/name:\s*['"](.*?)['"]/);
+                        const descMatch = content.match(/description:\s*['"](.*?)['"]/);
+                        
+                        // --- NUEVO: Extraer la categoría ---
+                        const categoryMatch = content.match(/category:\s*['"](.*?)['"]/);
+
+                        pluginsList.push({
+                            tebex_id: marketplaceData.tebex_id,
+                            name: nameMatch ? nameMatch[1] : file,
+                            desc: descMatch ? descMatch[1] : 'Sin descripción',
+                            category: categoryMatch ? categoryMatch[1] : 'Otros', // <--- Categoría extraída
+                            icon: marketplaceData.icon || 'fa-plug',
+                            price: marketplaceData.price || '0.00',
+                            preview: marketplaceData.preview,
+                            requirements: marketplaceData.requirements || [] 
+                        });
+                    }
+                }
+            } catch (e) {
+                console.error("❌ Error en " + file + ":", e.message);
+            }
+        }
+    });
+    return pluginsList;
+};
+
+// Ruta del Marketplace (Ahora es dinámica)
+app.get('/stunbot/marketplace', (req, res) => {
+    const plugins = getMarketplacePlugins();
+    res.send(renderMarketplace(plugins));
+});
+
+
+
 // ==========================================
 // 2. TEBEX - WEBHOOK (ENTREGA DE LICENCIA)
 // ==========================================
 app.post('/stunbot/tebex-webhook', async (req, res) => {
     const data = req.body;
-
-    // Validación de Tebex
-    if (data.type === 'validation.webhook') {
-        return res.status(200).json({ id: data.id });
-    }
-
-    // Firma de seguridad (Opcional, pero recomendada)
-    const signature = req.headers['x-signature'];
-    const secret = process.env.TEBEX_SECRET; // Webhook Secret (b0ff...)
-    if (signature && secret) {
-        const hash = crypto.createHmac('sha256', secret).update(JSON.stringify(req.body)).digest('hex');
-        if (signature !== hash) return res.status(401).send('Firma inválida');
-    }
-
-    // Pago completado
+    if (data.type === 'validation.webhook') return res.status(200).json({ id: data.id });
+    
     if (data.type === 'payment.completed') {
         const email = data.subject.customer.email;
-        const transactionId = data.subject.transaction_id;
-        const amount = data.subject.amount.value;
+        const pkgId = data.subject.items[0].package_id;
 
         try {
-            // Generar licencia
-            const newLicense = `STUNBOT-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-
-            // Insertar en Base de Datos
-            await pool.query(
-                'INSERT INTO licenses (license_key, whatsapp_jid, is_active, client_name) VALUES ($1, $2, $3, $4)',
-                [newLicense, 'pendiente@s.whatsapp.net', true, email]
-            );
-
-            // Registrar Venta
-            await pool.query(
-                'INSERT INTO sales (email, transaction_id, amount, status, license_generated, payment_method) VALUES ($1, $2, $3, $4, $5, $6)',
-                [email, transactionId, amount, 'completed', newLicense, 'tebex']
-            );
-
-            console.log(`✅ Licencia generada para: ${email}`);
-            return res.status(200).send('OK');
-        } catch (e) {
-            console.error("Error DB Webhook:", e);
-            return res.status(500).send('DB Error');
-        }
+            if (pkgId === 7383010) { // ID DE LA LICENCIA BASE
+                const newLicense = `STUNBOT-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+                await pool.query('INSERT INTO licenses (license_key, whatsapp_jid, is_active, client_name) VALUES ($1, $2, $3, $4)', [newLicense, 'pendiente@s.whatsapp.net', true, email]);
+                console.log("✅ Licencia Base Creada");
+            } else {
+                // ES UN PLUGIN
+                // Buscamos la licencia del cliente por su email
+                const user = await pool.query('SELECT license_key FROM licenses WHERE client_name = $1', [email]);
+                if (user.rows.length > 0) {
+                    const lkey = user.rows[0].license_key;
+                    const pluginName = data.subject.items[0].name;
+                    await pool.query('INSERT INTO license_plugins (license_key, plugin_identifier, transaction_id) VALUES ($1, $2, $3)', 
+                    [lkey, pluginName, data.subject.transaction_id]);
+                    console.log(`🔌 Plugin ${pluginName} activado para ${lkey}`);
+                }
+            }
+            res.status(200).send('OK');
+        } catch (e) { res.status(500).send('Error'); }
     }
-
-    res.status(200).send('Ignored');
 });
+
 
 // ==========================================
 // 3. RUTAS DE NAVEGACIÓN
@@ -145,13 +191,24 @@ app.post('/stunbot/verify', async (req, res) => {
     const { license_key } = req.body;
     try {
         const result = await pool.query('SELECT whatsapp_jid, is_active, ignored_groups FROM licenses WHERE license_key = $1', [license_key]);
+        
         if (result.rows.length > 0) {
             const lic = result.rows[0];
-            if (lic.is_active) return res.json({ valid: true, jid: lic.whatsapp_jid, ignored_groups: lic.ignored_groups });
+            if (lic.is_active) {
+                return res.json({ 
+                    valid: true, 
+                    jid: lic.whatsapp_jid, 
+                    ignored_groups: lic.ignored_groups || "" 
+                });
+            }
             return res.status(403).json({ valid: false, message: 'Licencia desactivada' });
         }
-        res.status(404).json({ valid: false, message: 'No encontrada' });
-    } catch (e) { res.status(500).json({ valid: false }); }
+        res.status(404).json({ valid: false, message: 'Licencia no encontrada' });
+    } catch (e) {
+        // ESTA LÍNEA ES VITAL: Te dirá el error en la consola de Node/PM2
+        console.error("❌ ERROR CRÍTICO EN VERIFY:", e.message);
+        res.status(500).json({ valid: false, error: e.message });
+    }
 });
 
 // 2. Recuperar por Email (ESTA ES LA QUE TE DABA 404)
