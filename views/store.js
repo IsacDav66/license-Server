@@ -5,8 +5,21 @@ const renderStore = () => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>StunBot | Digital Store</title>
         
+        <!-- Icono de la pestaña del navegador -->
+        <link rel="icon" type="image/png" href="/stunbot/logo.png">
+
+        <!-- Etiquetas para WhatsApp -->
+        <meta property="og:title" content="StunBot | Tienda Oficial">
+        <meta property="og:description" content="Adquiere tu licencia oficial. Automatización segura y privada.">
+        <meta property="og:image" content="https://davcenter.servequake.com/stunbot/logo.png">
+        <meta property="og:image:width" content="500">
+        <meta property="og:image:height" content="500">
+        <meta property="og:url" content="https://davcenter.servequake.com/stunbot/store">
+        <meta property="og:type" content="website">
+
+        <title>StunBot | Digital Store</title>
+            
         <!-- Librerías Externas -->
         <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono&display=swap" rel="stylesheet">

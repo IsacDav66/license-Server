@@ -7,7 +7,20 @@ const renderMarketplace = (plugins) => {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        <!-- Icono de la pestaña del navegador -->
+        <link rel="icon" type="image/png" href="/stunbot/logo.png">
+        
+        <!-- Etiquetas para WhatsApp -->
+        <meta property="og:title" content="StunBot | Cloud Systems">
+        <meta property="og:description" content="Automatización privada de WhatsApp.">
+        <meta property="og:image" content="https://davcenter.servequake.com/stunbot/logo.png">
+        <meta property="og:image:width" content="500">
+        <meta property="og:image:height" content="500">
+        <meta property="og:url" content="https://davcenter.servequake.com/stunbot/store">
+        <meta property="og:type" content="website">
         <title>StunBot | Marketplace</title>
+
         <link rel="stylesheet" href="https://use.fontawesome.com/releases/v6.4.0/css/all.css">
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
         <script src="https://js.tebex.io/"></script>

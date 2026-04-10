@@ -131,7 +131,17 @@ app.get('/stunbot/marketplace', (req, res) => {
 });
 
 
-
+// Servir el logo para las vistas previas de WhatsApp
+app.get('/stunbot/logo.png', (req, res) => {
+    const logoPath = path.join(__dirname, 'assets', 'logo.png');
+    
+    // Verificamos si el archivo existe antes de enviarlo
+    if (fs.existsSync(logoPath)) {
+        res.sendFile(logoPath);
+    } else {
+        res.status(404).send('Logo no encontrado');
+    }
+});
 // ==========================================
 // 2. TEBEX - WEBHOOK (ENTREGA DE LICENCIA)
 // ==========================================
