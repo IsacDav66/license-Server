@@ -23,6 +23,19 @@ const pool = new Pool({
 
 app.use(express.json());
 
+
+// IMPORTANTE: Pon esto antes de cualquier otra ruta app.get o app.post
+// Esto sirve la carpeta assets para que sea pública
+app.use('/stunbot/assets', express.static(path.join(__dirname, 'assets')));
+
+// LOG DE DEPURACIÓN: Añade esto para ver qué está pidiendo el servidor
+app.use((req, res, next) => {
+    if (req.url.includes('assets')) {
+        console.log(`📂 [Static Server] Petición recibida: ${req.url}`);
+    }
+    next();
+});
+
 // ==========================================
 // 1. TEBEX - CREAR SESIÓN DE PAGO (MODAL)
 // ==========================================
