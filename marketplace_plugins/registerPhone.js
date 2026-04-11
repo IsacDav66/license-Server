@@ -2,7 +2,7 @@
 // Maneja el registro inicial del teléfono y la actualización del mismo,
 // permitiendo la actualización incluso durante el proceso de registro.
 
-const { getUserData, saveUserData, validateAndNormalizePhone } = require('../shared-economy');
+const { getUserData, saveUserData, validateAndNormalizePhone } = require('../../lib/bot-core');
 const { jidDecode } = require('@whiskeysockets/baileys');
 
 module.exports = {

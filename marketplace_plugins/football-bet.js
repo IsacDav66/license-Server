@@ -1,5 +1,34 @@
 // plugins/football-bet.js (Baileys Version - API-Sports.io)
 require('dotenv').config();
+
+const brDB = {
+    getAll: () => db.prepare('SELECT * FROM brainroots_characters ORDER BY rarity ASC').all(),
+    getById: (id) => db.prepare('SELECT * FROM brainroots_characters WHERE id = ?').get(id),
+    getByName: (n) => db.prepare('SELECT * FROM brainroots_characters WHERE LOWER(name) = LOWER(?)').get(n),
+    addToUser: (u, c) => { const ts = Date.now(); db.prepare('INSERT INTO user_brainroots (user_id, character_id, catch_timestamp, last_income_timestamp) VALUES (?, ?, ?, ?)').run(u, c, ts, ts); },
+    getUserColl: (u) => db.prepare('SELECT ub.id AS entry_id, bc.*, ub.catch_timestamp, ub.last_income_timestamp FROM user_brainroots ub JOIN brainroots_characters bc ON ub.character_id = bc.id WHERE ub.user_id = ?').all(u),
+    updateIncome: (id, ts) => db.prepare('UPDATE user_brainroots SET last_income_timestamp = ? WHERE id = ?').run(ts, id),
+    remove: (u, c) => { const row = db.prepare('SELECT id FROM user_brainroots WHERE user_id = ? AND character_id = ? LIMIT 1').get(u, c); if(row) db.prepare('DELETE FROM user_brainroots WHERE id = ?').run(row.id); return !!row; },
+    getRandom: (u) => db.prepare('SELECT ub.id as entry_id, bc.* FROM user_brainroots ub JOIN brainroots_characters bc ON ub.character_id = bc.id WHERE ub.user_id = ? ORDER BY RANDOM() LIMIT 1').get(u),
+    addMarket: (s, c, p) => db.prepare('INSERT INTO brainroots_market (seller_id, character_id, price, listing_timestamp) VALUES (?, ?, ?, ?)').run(s, c, p, Date.now()).lastInsertRowid,
+    removeMarket: (id, s) => s ? db.prepare('DELETE FROM brainroots_market WHERE id = ? AND seller_id = ? RETURNING *').get(id, s) : db.prepare('DELETE FROM brainroots_market WHERE id = ? RETURNING *').get(id),
+    getListings: () => db.prepare('SELECT bm.id as listing_id, bc.name, bc.rarity, bm.price as listing_price, bm.seller_id FROM brainroots_market bm JOIN brainroots_characters bc ON bm.character_id = bc.id').all(),
+    getListingById: (id) => db.prepare('SELECT * FROM brainroots_market WHERE id = ?').get(id)
+};
+
+const fbDB = {
+    getMatch: (id) => db.prepare('SELECT * FROM football_matches WHERE api_match_id = ?').get(id),
+    saveMatch: (m) => { const cols = Object.keys(m); const placeholders = cols.map(() => '?').join(', '); const updates = cols.map(c => `"${c}" = excluded."${c}"`).join(', '); db.prepare(`INSERT INTO football_matches (${cols.join(',')}) VALUES (${placeholders}) ON CONFLICT(api_match_id) DO UPDATE SET ${updates}`).run(...Object.values(m)); },
+    getOpen: () => db.prepare("SELECT * FROM football_matches WHERE status_short NOT IN ('FT', 'AET', 'PEN')").all(),
+    getSettlable: () => db.prepare("SELECT DISTINCT fm.* FROM football_matches fm JOIN user_bets ub ON fm.api_match_id = ub.api_match_id WHERE fm.status_short IN ('FT') AND ub.status = 'PENDING'").all(),
+    addBet: (u, m, c, a) => db.prepare('INSERT INTO user_bets (user_id, api_match_id, bet_choice, amount, bet_timestamp) VALUES (?, ?, ?, ?, ?)').run(u, m, c, a, Date.now()).lastInsertRowid,
+    getPendingBets: (u) => db.prepare('SELECT ub.*, fm.home_team, fm.away_team FROM user_bets ub JOIN football_matches fm ON ub.api_match_id = fm.api_match_id WHERE ub.user_id = ? AND ub.status = "PENDING"').all(u),
+    getBetsToSettle: (id) => db.prepare('SELECT * FROM user_bets WHERE api_match_id = ? AND status = "PENDING"').all(id),
+    updateBet: (id, s) => db.prepare('UPDATE user_bets SET status = ? WHERE bet_id = ?').run(s, id),
+    getRecentBets: (u, l) => db.prepare('SELECT * FROM user_bets WHERE user_id = ? AND status != "PENDING" LIMIT ?').all(u, l),
+    getAllSettled: (u) => db.prepare('SELECT * FROM user_bets WHERE user_id = ? AND status IN ("WON", "LOST")').all(u)
+};
+
 const { default: fetch } = require('node-fetch');
 
 const {
@@ -8,7 +37,7 @@ const {
     getSettlableFootballMatches, addUserBet, getUserPendingBets,
     getBetsForMatchToSettle, updateBetStatus, getUserRecentSettledBets,
     getAllUserSettledBets // <--- NUEVA IMPORTACIÓN (necesitará una función en shared-economy.js)
-} = require('../shared-economy');
+} = require('../../lib/bot-core');
 
 const API_SPORTS_KEY = process.env.API_SPORTS_KEY;
 const API_SPORTS_BASE_URL = 'https://v3.football.api-sports.io';
@@ -317,7 +346,7 @@ const execute = async (sock, msg, args, commandName, finalUserIdForEconomy) => {
     }
 };
 async function handleListMatches(sock, msg, user) {
-    const openMatches = await getOpenFootballMatches();
+    const openMatches = await fbDB.getOpen();
     
     console.log(`\x1b[33m[Football Bet Debug]\x1b[0m Partidos recuperados de la DB para !partidos: ${openMatches.length} partidos.`, 
         openMatches.map(m => ({
@@ -425,7 +454,7 @@ async function handlePlaceBet(sock, msg, user, args) {
 
     user.money -= amount;
     await saveUserData(user.userId, user);
-    const betId = await addUserBet(user.userId, matchId, betChoice, amount);
+    const betId = await fbDB.addBet(user.userId, matchId, betChoice, amount);
 
     if (betId) {
         let betMessage = `✅ Apuesta #${betId} de ${MONEY_SYMBOL}${amount.toLocaleString()} realizada con éxito!\n` +
@@ -501,7 +530,7 @@ async function calculateNetWinnings(userId) {
 }
 
 async function handleMyBets(sock, msg, user) {
-    const pendingBets = await getUserPendingBets(user.userId);
+    const pendingBets = await fbDB.getPendingBets(user.userId);
     // --- NUEVO: Calcular ganancias netas ---
     const { totalAmountBet, totalWinnings, totalLosses, netGain } = await calculateNetWinnings(user.userId);
 
@@ -633,6 +662,8 @@ module.exports = {
     isListener: true,
     execute,
     marketplace: {
+        externalDependencies: ["node-fetch@^3.3.2"],
+        dbSchema: ` CREATE TABLE IF NOT EXISTS football_matches (api_match_id INTEGER PRIMARY KEY, home_team TEXT, away_team TEXT, home_win_multiplier REAL, away_win_multiplier REAL, draw_multiplier REAL, status_short TEXT); CREATE TABLE IF NOT EXISTS user_bets (bet_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, api_match_id INTEGER, bet_choice TEXT, amount INTEGER, status TEXT DEFAULT 'PENDING'); `,
         requirements: ["API-Sports.io Key","Base de Datos PostgreSQL"],
         tebex_id: 7383037,
         price: "20.00",

@@ -1,5 +1,21 @@
 // --- plugins/google_ai_responder.js (Versión Sin Análisis Pasivo y Love System Corregido) ---
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
+
+const brDB = {
+    getAll: () => db.prepare('SELECT * FROM brainroots_characters ORDER BY rarity ASC').all(),
+    getById: (id) => db.prepare('SELECT * FROM brainroots_characters WHERE id = ?').get(id),
+    getByName: (n) => db.prepare('SELECT * FROM brainroots_characters WHERE LOWER(name) = LOWER(?)').get(n),
+    addToUser: (u, c) => { const ts = Date.now(); db.prepare('INSERT INTO user_brainroots (user_id, character_id, catch_timestamp, last_income_timestamp) VALUES (?, ?, ?, ?)').run(u, c, ts, ts); },
+    getUserColl: (u) => db.prepare('SELECT ub.id AS entry_id, bc.*, ub.catch_timestamp, ub.last_income_timestamp FROM user_brainroots ub JOIN brainroots_characters bc ON ub.character_id = bc.id WHERE ub.user_id = ?').all(u),
+    updateIncome: (id, ts) => db.prepare('UPDATE user_brainroots SET last_income_timestamp = ? WHERE id = ?').run(ts, id),
+    remove: (u, c) => { const row = db.prepare('SELECT id FROM user_brainroots WHERE user_id = ? AND character_id = ? LIMIT 1').get(u, c); if(row) db.prepare('DELETE FROM user_brainroots WHERE id = ?').run(row.id); return !!row; },
+    getRandom: (u) => db.prepare('SELECT ub.id as entry_id, bc.* FROM user_brainroots ub JOIN brainroots_characters bc ON ub.character_id = bc.id WHERE ub.user_id = ? ORDER BY RANDOM() LIMIT 1').get(u),
+    addMarket: (s, c, p) => db.prepare('INSERT INTO brainroots_market (seller_id, character_id, price, listing_timestamp) VALUES (?, ?, ?, ?)').run(s, c, p, Date.now()).lastInsertRowid,
+    removeMarket: (id, s) => s ? db.prepare('DELETE FROM brainroots_market WHERE id = ? AND seller_id = ? RETURNING *').get(id, s) : db.prepare('DELETE FROM brainroots_market WHERE id = ? RETURNING *').get(id),
+    getListings: () => db.prepare('SELECT bm.id as listing_id, bc.name, bc.rarity, bm.price as listing_price, bm.seller_id FROM brainroots_market bm JOIN brainroots_characters bc ON bm.character_id = bc.id').all(),
+    getListingById: (id) => db.prepare('SELECT * FROM brainroots_market WHERE id = ?').get(id)
+};
+
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
@@ -411,6 +427,7 @@ module.exports = {
     category: 'Inteligencia Artificial',
     activateAI, deactivateAI, isAiCurrentlyActive,
     marketplace: {
+        externalDependencies: ["@google/generative-ai@^0.24.1","axios@^1.11.0","pino@^9.9.4"],
         requirements: ["Google Gemini API Key","ElevenLabs API Key","Base de Datos PostgreSQL"],
         tebex_id: 7383022,
         price: "25.00",
@@ -425,7 +442,29 @@ module.exports = {
                 },
                 "Cántame algo": "Feeeeliiiiz cuuumpleaaañooos aa tiiii... ¡Je je! 🎶 [ENVIAR_AUDIO]"
             }
-        }, lastIntervention: 0 });
+        },
+        requirements: ["Google Gemini API", "ElevenLabs API", "PostgreSQL"]
+    },
+
+    async checkMessage(sock, adaptedMessage) {
+        if (!GOOGLE_API_KEY || !genAI || !textModel || !imageModel || !sock.user?.id) {
+            return false;
+        }
+        const botJid = sock.user.id;
+        const messageText = adaptedMessage.body;
+        if (!messageText?.trim()) return false;
+
+        const chatId = adaptedMessage.from;
+        if (!chatId.endsWith('@g.us')) return false;
+
+        const senderId = adaptedMessage.author;
+        const senderName = (await adaptedMessage.getContact()).pushname || senderId.split('@')[0];
+
+        // --- Lógica Proactiva ---
+        if (PROACTIVE_INTERVENTION_ENABLED && senderId !== botJid && !messageText.startsWith('.')) {
+            const now = Date.now();
+            if (!groupActivityTracker.has(chatId)) {
+                groupActivityTracker.set(chatId, { messages: [], lastIntervention: 0 });
             }
             const activity = groupActivityTracker.get(chatId);
             activity.messages.push({ timestamp: now, text: messageText.substring(0, 100), senderName });

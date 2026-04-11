@@ -2,7 +2,7 @@
 
 const axios = require('axios');
 // --- ¡NUEVAS IMPORTACIONES! ---
-const { getUserData, saveUserData, msToTime } = require('../shared-economy');
+const { getUserData, saveUserData, msToTime } = require('../../lib/bot-core');
 
 // --- ¡NUEVA CONFIGURACIÓN! ---
 const COOLDOWN_TOP_MS = 5 * 60 * 60 * 1000; // 5 horas

@@ -1,6 +1,6 @@
 // plugins/changepass.js (Flujo de Recuperación de Contraseña)
 
-const { getUserData, saveUserData, validateAndNormalizePhone } = require('../shared-economy');
+const { getUserData, saveUserData, validateAndNormalizePhone } = require('../../lib/bot-core');
 
 module.exports = {
     name: 'Recuperar Contraseña',

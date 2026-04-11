@@ -4,7 +4,7 @@ const {
     getUserData, 
     saveUserData, 
     hashPassword 
-} = require('../shared-economy');
+} = require('../../lib/bot-core');
 // Ya no necesitamos las otras funciones aquí
 
 module.exports = {

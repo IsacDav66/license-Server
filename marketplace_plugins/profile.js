@@ -6,7 +6,7 @@ const fs = require('fs').promises;
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 const ffmpeg = require('fluent-ffmpeg');
-const { getUserData, pool } = require('../shared-economy');
+const { getUserData, pool } = require('../../lib/bot-core');
 
 // --- Importar jidDecode de Baileys (Asumiendo @whiskeysockets/baileys) ---
 const { jidDecode } = require('@whiskeysockets/baileys'); 
@@ -189,6 +189,7 @@ module.exports = {
     description: 'Muestra tu perfil o el de otro usuario (mencionando o respondiendo).',
     category: 'Economía',
     marketplace: {
+        externalDependencies: ["canvas@^3.2.0","axios@^1.11.0","uuid@^11.1.0","fluent-ffmpeg@^2.1.3","@ffmpeg-installer/ffmpeg@^1.1.0"],
         requirements: ["FFmpeg instalado","Fuente Roboto-Bold.ttf"],
         tebex_id: 7383043,
         price: "15.00",

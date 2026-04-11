@@ -1,7 +1,7 @@
 // plugins/bank.js (Baileys Version)
 // Comandos para depositar y retirar dinero del banco.
 
-const { getUserData, saveUserData } = require('../shared-economy');
+const { getUserData, saveUserData } = require('../../lib/bot-core');
 const MONEY_SYMBOL = '$'; // Puedes cambiarlo a 💵 si prefieres
 
 // Ajustar parámetros a sock, msg, args, commandName

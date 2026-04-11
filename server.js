@@ -175,7 +175,23 @@ app.post('/stunbot/tebex-webhook', async (req, res) => {
     }
 });
 
+// 1. Nueva conexión a la base de datos de contenido (Brainroots)
+const brainrootsPool = new Pool({
+    connectionString: "postgres://avnadmin:AVNS_8T5Ef6OrEyxxdVmMoO9@basebotaiven-isadavid-3be1.f.aivencloud.com:20440/defaultdb?sslmode=require",
+    ssl: { rejectUnauthorized: false }
+});
 
+// 2. Endpoint de Sincronización para los bots clientes
+app.get('/stunbot/api/sync/brainroots', async (req, res) => {
+    try {
+        console.log("☁️  Sincronizando Brainroots desde la DB externa...");
+        const result = await brainrootsPool.query('SELECT name, rarity, price, image_filename FROM brainroots_characters');
+        res.json(result.rows); // Enviamos los datos reales de Aiven
+    } catch (e) {
+        console.error("Error consultando DB de Aiven:", e.message);
+        res.status(500).json({ error: "Fallo en sincronización" });
+    }
+});
 // ==========================================
 // 3. RUTAS DE NAVEGACIÓN
 // ==========================================

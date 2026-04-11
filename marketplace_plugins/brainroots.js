@@ -1,916 +1,851 @@
-// plugins/brainroots.js (Versión basada en comando de spawn - Corregido LID para Remitente y Menciones, Categoría 'Brainroots')
+// plugins/brainroots.js
+// Versión modular: usa el core para BD y sincroniza personajes desde Oracle Cloud.
 
-const path = require('path');
-const fs = require('fs');
-const { 
-    getUserData, saveUserData, msToTime, findUserName,
-    getAllBrainrootsCharacters, getBrainrootsCharacterById, getBrainrootsCharacterByName,
-    addBrainrootsToUser, getUserBrainroots, updateBrainrootIncomeTimestamp,
-    removeBrainrootFromUser, getRandomUserBrainroot,
-    pickRandom,
-    addBrainrootToMarket, removeBrainrootFromMarket, getBrainrootsMarketListings, getBrainrootMarketListingById
-} = require('../shared-economy');
+'use strict';
 
-// --- CONFIGURACIÓN DE ROBO DE BRAINROOTS ---
-const COOLDOWN_ROB_COMMAND_MS = 2 * 60 * 60 * 1000; // 2 horas de cooldown para el comando !brrob
-const BASE_ROB_SUCCESS_CHANCE = 0.50; // 50% de probabilidad base de éxito (0.0 a 1.0)
-const RARITY_BONUS_PENALTY_PER_LEVEL = 0.05; // 5% de cambio en la probabilidad por cada nivel de rareza
+const path  = require('path');
+const fs    = require('fs');
+const axios = require('axios');
 
-// --- CONFIGURACIÓN DE INGRESO PASIVO ---
-const INCOME_INTERVAL_HOURS = 1; // Cada 1 hora
-const INCOME_PERCENTAGE_PER_DAY = 0.70; // 70% del valor al día
+const { db, getUserData, saveUserData, msToTime, pickRandom, downloadAsset } = require('../../lib/bot-core');
 
-const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
-const INCOME_INTERVAL_MS = INCOME_INTERVAL_HOURS * 60 * 60 * 1000;
+// =============================================================================
+// CONFIGURACIÓN
+// =============================================================================
+
+const COOLDOWN_ROB_COMMAND_MS        = 2 * 60 * 60 * 1000; // 2 h
+const BASE_ROB_SUCCESS_CHANCE        = 0.50;
+const RARITY_BONUS_PENALTY_PER_LEVEL = 0.05;
+
+const INCOME_INTERVAL_HOURS          = 1;
+const INCOME_PERCENTAGE_PER_DAY      = 0.70;
+const INCOME_INTERVAL_MS             = INCOME_INTERVAL_HOURS * 60 * 60 * 1000;
 const INCOME_PERCENTAGE_PER_INTERVAL = (INCOME_PERCENTAGE_PER_DAY * INCOME_INTERVAL_HOURS) / 24;
 
-const MONEY_SYMBOL = '$';
-const ASSETS_BRAINROOTS_DIR = path.join(__dirname, '..','..', 'assets', 'brainroots');
+const CATCH_WINDOW_MS          = 30 * 1000;
+const COOLDOWN_SPAWN_COMMAND_MS = 5 * 60 * 1000;
 
-// --- CONFIGURACIÓN DEL SPAWN POR COMANDO ---
-const CATCH_WINDOW_MS = 30 * 1000; // 30 segundos para atrapar el Brainroot aparecido
-const COOLDOWN_SPAWN_COMMAND_MS = 5 * 60 * 1000; // 5 minutos de cooldown para el comando !brspawn
+const MONEY_SYMBOL          = '$';
+const ASSETS_BRAINROOTS_DIR = path.join(__dirname, '..', '..', 'assets', 'brainroots');
+const CLOUD_ASSETS_BASE_URL = 'https://davcenter.servequake.com/stunbot/assets/brainroots';
+const SYNC_API_URL          = 'https://davcenter.servequake.com/stunbot/api/sync/brainroots';
 
-// --- Variables de estado global ---
-let currentSpawnedCharacter = null; // { id, name, image_filename, rarity, price, spawnedJid }
-let catchTimer = null;              // setTimeout ID para el tiempo de captura
-let allCharacters = [];             // Caché de todos los personajes Brainroots
-let rarityWeights = [];             // Lista ponderada de IDs de personajes para selección por rareza
+// =============================================================================
+// ESTADO GLOBAL DEL PLUGIN
+// =============================================================================
 
-// --- FUNCIÓN DE INICIALIZACIÓN (Se ejecuta al cargar el plugin) ---
-async function initializeBrainrootsPlugin() {
-    console.log("[Brainroots Plugin] Iniciando initializeBrainrootsPlugin...");
-    try {
-        allCharacters = await getAllBrainrootsCharacters();
-         console.log(`[Brainroots Plugin DEBUG] allCharacters (después de la carga): ${allCharacters.length} entradas. (Detalles omitidos para brevedad)`);
+let currentSpawnedCharacter = null; // { ...char, spawnedJid }
+let catchTimer              = null;
+let allCharacters           = [];
+let rarityWeights           = [];
 
-        if (allCharacters.length === 0) {
-            console.warn("[Brainroots Plugin] No se encontraron personajes Brainroots en la BD. La tabla 'brainroots_characters' está vacía o hubo un error al cargarla.");
-        }
+// =============================================================================
+// dbLogic — TODA la lógica SQL de este plugin queda aquí.
+// Los plugins externos usan require('../../lib/bot-core').db para sus propias queries.
+// =============================================================================
 
-        rarityWeights = []; 
-        if (allCharacters.length > 0) { 
-            allCharacters.forEach(char => {
-                let weight;
-                switch (char.rarity) {
-                    case 1: weight = 50; break;
-                    case 2: weight = 25; break;
-                    case 3: weight = 10; break;
-                    case 4: weight = 3;  break;
-                    case 5: weight = 1;  break;
-                    default: weight = 1; break;
-                }
-                for (let i = 0; i < weight; i++) {
-                    rarityWeights.push(char.id);
-                }
-            });
-        }
+const dbLogic = {
 
+    // -- Personajes -----------------------------------------------------------
 
-        console.log(`[Brainroots Plugin DEBUG] rarityWeights (después de la población del forEach): ${rarityWeights.length} entradas.`);
-        
-        console.log(`[Brainroots Plugin] Ventana de captura: ${CATCH_WINDOW_MS / 1000} segundos.`);
-        console.log(`[Brainroots Plugin] Cooldown de comando !brspawn: ${COOLDOWN_SPAWN_COMMAND_MS / 60000} minutos.`);
-        
-        console.log("[Brainroots Plugin] Inicialización completada exitosamente.");
+    getAllCharacters: () =>
+        db.prepare('SELECT * FROM brainroots_characters ORDER BY rarity ASC').all(),
 
-    } catch (error) {
-        console.error("[Brainroots Plugin] Error crítico durante initializeBrainrootsPlugin:", error);
-        rarityWeights = [];
-        allCharacters = [];
+    getCharacterById: (id) =>
+        db.prepare('SELECT * FROM brainroots_characters WHERE id = ?').get(id),
+
+    getCharacterByName: (name) =>
+        db.prepare('SELECT * FROM brainroots_characters WHERE LOWER(name) = LOWER(?)').get(name),
+
+    /** Upsert de un personaje (usado en la sincronización cloud) */
+    upsertCharacter: db.transaction((char) => {
+        db.prepare(`
+            INSERT INTO brainroots_characters (id, name, image_filename, rarity, price)
+            VALUES (@id, @name, @image_filename, @rarity, @price)
+            ON CONFLICT(id) DO UPDATE SET
+                name           = excluded.name,
+                image_filename = excluded.image_filename,
+                rarity         = excluded.rarity,
+                price          = excluded.price;
+        `).run(char);
+    }),
+
+    // -- Colección de usuario -------------------------------------------------
+
+    addToUser: (userId, characterId) => {
+        const ts = Date.now();
+        db.prepare(`
+            INSERT INTO user_brainroots (user_id, character_id, catch_timestamp, last_income_timestamp)
+            VALUES (?, ?, ?, ?)
+        `).run(userId, characterId, ts, ts);
+        return true;
+    },
+
+    getUserCollection: (userId) =>
+        db.prepare(`
+            SELECT
+                ub.id   AS user_brainroot_entry_id,
+                bc.*,
+                ub.catch_timestamp,
+                ub.last_income_timestamp
+            FROM user_brainroots ub
+            JOIN brainroots_characters bc ON ub.character_id = bc.id
+            WHERE ub.user_id = ?
+        `).all(userId),
+
+    updateIncomeTimestamp: (entryId, timestamp) =>
+        db.prepare('UPDATE user_brainroots SET last_income_timestamp = ? WHERE id = ?')
+          .run(timestamp, entryId),
+
+    /** Elimina la entrada más antigua de un (user, character) y devuelve true si lo hizo */
+    removeFromUser: (userId, characterId) => {
+        const row = db.prepare(`
+            SELECT id FROM user_brainroots
+            WHERE user_id = ? AND character_id = ?
+            ORDER BY catch_timestamp ASC
+            LIMIT 1
+        `).get(userId, characterId);
+        if (!row) return false;
+        db.prepare('DELETE FROM user_brainroots WHERE id = ?').run(row.id);
+        return true;
+    },
+
+    getRandomUserBrainroot: (userId) =>
+        db.prepare(`
+            SELECT ub.id AS user_brainroot_entry_id, bc.*
+            FROM user_brainroots ub
+            JOIN brainroots_characters bc ON ub.character_id = bc.id
+            WHERE ub.user_id = ?
+            ORDER BY RANDOM()
+            LIMIT 1
+        `).get(userId),
+
+    // -- Mercado --------------------------------------------------------------
+
+    addToMarket: (sellerId, characterId, price) => {
+        const result = db.prepare(`
+            INSERT INTO brainroots_market (seller_id, character_id, price, listing_timestamp)
+            VALUES (?, ?, ?, ?)
+        `).run(sellerId, characterId, price, Date.now());
+        return result.lastInsertRowid || null;
+    },
+
+    /**
+     * Quita un listing del mercado y devuelve la fila eliminada, o null si no existe /
+     * el sellerId no coincide.
+     */
+    removeFromMarket: (listingId, sellerId = null) => {
+        const whereExtra = sellerId ? 'AND seller_id = ?' : '';
+        const params     = sellerId ? [listingId, sellerId] : [listingId];
+        const row = db.prepare(`SELECT * FROM brainroots_market WHERE id = ? ${whereExtra}`).get(...params);
+        if (!row) return null;
+        db.prepare(`DELETE FROM brainroots_market WHERE id = ? ${whereExtra}`).run(...params);
+        return row;
+    },
+
+    getMarketListings: () =>
+        db.prepare(`
+            SELECT
+                bm.id            AS listing_id,
+                bm.seller_id,
+                bm.price         AS listing_price,
+                bm.listing_timestamp,
+                bc.id            AS character_id,
+                bc.name,
+                bc.rarity,
+                bc.price         AS base_price,
+                bc.image_filename
+            FROM brainroots_market bm
+            JOIN brainroots_characters bc ON bm.character_id = bc.id
+            ORDER BY bm.listing_timestamp ASC
+        `).all(),
+
+    getMarketListingById: (id) =>
+        db.prepare(`
+            SELECT
+                bm.*,
+                bc.name,
+                bc.rarity,
+                bc.image_filename
+            FROM brainroots_market bm
+            JOIN brainroots_characters bc ON bm.character_id = bc.id
+            WHERE bm.id = ?
+        `).get(id),
+};
+
+// =============================================================================
+// HELPERS INTERNOS
+// =============================================================================
+
+/** Reconstruye la caché de personajes y pesos de rareza tras una sincronización */
+function rebuildRarityCache(characters) {
+    allCharacters = characters;
+    rarityWeights = [];
+    const weightMap = { 1: 50, 2: 25, 3: 10, 4: 3, 5: 1 };
+    for (const char of characters) {
+        const w = weightMap[char.rarity] ?? 1;
+        for (let i = 0; i < w; i++) rarityWeights.push(char.id);
     }
+    console.log(`[Brainroots] Caché: ${allCharacters.length} personajes, ${rarityWeights.length} pesos de rareza.`);
 }
 
-
-// --- FUNCIÓN PARA ELEGIR UN PERSONAJE SEGÚN RAREZA ---
 function chooseCharacterByRarity() {
-    if (rarityWeights.length === 0) {
-        console.warn("[Brainroots Spawn] rarityWeights está vacío, no se puede elegir un personaje.");
-        return null;
-    }
-    const chosenId = pickRandom(rarityWeights);
-    const chosenCharacter = allCharacters.find(char => char.id === chosenId);
-    console.log(`[Brainroots Spawn] Personaje elegido por rareza: ${chosenCharacter ? chosenCharacter.name : 'ERROR: ID no encontrado'}`);
-    return chosenCharacter;
+    if (!rarityWeights.length) return null;
+    const id   = pickRandom(rarityWeights);
+    return allCharacters.find(c => c.id === id) ?? null;
 }
 
-// --- LÓGICA DEL PLUGIN PRINCIPAL ---
+// =============================================================================
+// EXPORTACIÓN DEL MÓDULO
+// =============================================================================
+
 module.exports = {
-    name: 'Brainroots',
-    aliases: ['brspawn', 'spawnbr', 'brainrootcomprar', 'mybr', 'misbr', 'brainrootscollection', 'brincome', 'claimbr', 'brgift', 'regalarbr', 'brrob', 'robarbr', 'claim', 'brsell', 'venderbr', 'brunsell', 'quitarbr', 'brmarket', 'brshop', 'brbuy', 'comprarbr'],
-    description: 'Comandos de Brainroots: spawn, atrapar (.claim o .brainrootcomprar [nombre]), colección, ingresos, regalo, robo y mercado.',
-    category: 'Brainroots', // <--- Mantiene la categoría 'Brainroots'
-    groupOnly: false,
+    name:        'Brainroots',
+    aliases:     ['brspawn','spawnbr','brainrootcomprar','mybr','misbr','brainrootscollection',
+                  'brincome','claimbr','brgift','regalarbr','brrob','robarbr','claim',
+                  'brsell','venderbr','brunsell','quitarbr','brmarket','brshop','brbuy','comprarbr'],
+    description: 'Comandos de Brainroots: spawn, atrapar, colección, ingresos, regalo, robo y mercado.',
+    category:    'Brainroots',
+    groupOnly:   false,
+
+    // -------------------------------------------------------------------------
+    // BLOQUE MARKETPLACE
+    // -------------------------------------------------------------------------
     marketplace: {
-        tebex_id: 7383076,
-        price: "25.00",
-        icon: "fa-brain",
+        tebex_id:             7383076,
+        price:                "25.00",
+        icon:                 "fa-brain",
+        externalDependencies: ["axios@^1.11.0"],
+
+        // Esquema SQLite completo del plugin (lo lee el sistema de licencias para
+        // crear las tablas la primera vez que se activa).
+        dbSchema: `
+            CREATE TABLE IF NOT EXISTS brainroots_characters (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                name           TEXT    NOT NULL UNIQUE,
+                image_filename TEXT    NOT NULL,
+                rarity         INTEGER NOT NULL,
+                price          INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS user_brainroots (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id               TEXT    NOT NULL,
+                character_id          INTEGER NOT NULL REFERENCES brainroots_characters(id),
+                catch_timestamp       INTEGER NOT NULL,
+                last_income_timestamp INTEGER DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS brainroots_market (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                seller_id         TEXT    NOT NULL,
+                character_id      INTEGER NOT NULL REFERENCES brainroots_characters(id),
+                price             INTEGER NOT NULL,
+                listing_timestamp INTEGER NOT NULL
+            );
+        `,
+
         preview: {
-            suggestions: ["!brspawn", ".claim", "!brmarket"],
+            suggestions: ['!brspawn', '.claim', '!brmarket'],
             responses: {
-                "!brspawn": {
-                    text: "¡Un Brainroot salvaje apareció! 💥\n*Tralarero Tralala*\nRareza: 4/5\nPrecio: $15,000\n\n_Usa .claim para atraparlo!_",
-                    image: "https://makerworld.bblmw.com/makerworld/model/USd4f2b366dfc775/design/2025-04-11_1cc7bb0854a2f.webp?x-oss-process=image/resize,w_1000/format,webp"
+                '!brspawn': {
+                    text:  '¡Un Brainroot salvaje apareció! 💥\n*Tralarero Tralala*\nRareza: 4/5\nPrecio: $15,000\n\n_Usa .claim para atraparlo!_',
+                    image: 'https://makerworld.bblmw.com/makerworld/model/USd4f2b366dfc775/design/2025-04-11_1cc7bb0854a2f.webp?x-oss-process=image/resize,w_1000/format,webp',
                 },
-                ".claim": {
-                    text: "⏰ ¡Demasiado tarde! El Brainroot ya escapó o fue atrapado."
-                },
-                "!brmarket": "*🛒 Brainroots en el Mercado:*\n\n[ID: 45] *Brr brr patapim* (Rareza 2)\nPrecio: $5,000 | Vendedor: @Admin"
-            }
-        }
+                '.claim':    { text: '⏰ ¡Demasiado tarde! El Brainroot ya escapó o fue atrapado.' },
+                '!brmarket': '*🛒 Brainroots en el Mercado:*\n\n[ID: 45] *Brr brr patapim* (Rareza 2)\nPrecio: $5,000 | Vendedor: @Admin',
+            },
+        },
     },
 
+    // -------------------------------------------------------------------------
+    // onLoad — sincronización cloud + caché local
+    // -------------------------------------------------------------------------
     onLoad: async (sock) => {
-        console.log("[Brainroots Plugin] Función onLoad ejecutada.");
-        await initializeBrainrootsPlugin();
+        console.log('[Brainroots] onLoad iniciado.');
+
+        // 1. Sincronizar personajes desde Oracle Cloud
+        try {
+            console.log(`[Brainroots] Sincronizando personajes desde ${SYNC_API_URL}...`);
+            const { data } = await axios.get(SYNC_API_URL, { timeout: 10_000 });
+            const remoteChars = Array.isArray(data) ? data : (data.characters ?? []);
+
+            if (remoteChars.length > 0) {
+                // UPSERT atómico de todos los personajes recibidos
+                const upsertAll = db.transaction((chars) => {
+                    const stmt = db.prepare(`
+                        INSERT INTO brainroots_characters (id, name, image_filename, rarity, price)
+                        VALUES (@id, @name, @image_filename, @rarity, @price)
+                        ON CONFLICT(id) DO UPDATE SET
+                            name           = excluded.name,
+                            image_filename = excluded.image_filename,
+                            rarity         = excluded.rarity,
+                            price          = excluded.price;
+                    `);
+                    for (const c of chars) stmt.run(c);
+                });
+                upsertAll(remoteChars);
+                console.log(`[Brainroots] ${remoteChars.length} personajes sincronizados desde la nube.`);
+            } else {
+                console.warn('[Brainroots] La API de sync devolvió 0 personajes; se usarán los datos locales.');
+            }
+        } catch (err) {
+            console.warn(`[Brainroots] Error de sync cloud (continuando con BD local): ${err.message}`);
+        }
+
+        // 2. Cargar caché desde la BD local (ya actualizada o intacta)
+        const localChars = dbLogic.getAllCharacters();
+        if (localChars.length === 0) {
+            console.warn('[Brainroots] La tabla brainroots_characters está vacía. Los comandos de spawn no funcionarán hasta que se poblen los datos.');
+        }
+        rebuildRarityCache(localChars);
+
+        // 3. Asegurar que existe el directorio de assets
+        if (!fs.existsSync(ASSETS_BRAINROOTS_DIR)) {
+            fs.mkdirSync(ASSETS_BRAINROOTS_DIR, { recursive: true });
+            console.log(`[Brainroots] Directorio de assets creado en: ${ASSETS_BRAINROOTS_DIR}`);
+        }
+
+        console.log(`[Brainroots] onLoad completado. ${allCharacters.length} personajes listos.`);
+        console.log(`[Brainroots] Ventana de captura: ${CATCH_WINDOW_MS / 1000}s | Cooldown spawn: ${COOLDOWN_SPAWN_COMMAND_MS / 60_000}min.`);
     },
 
-    async execute(sock, msg, args, commandName, finalUserIdFromMain = null) { // Acepta finalUserIdFromMain pero no se confía en él
-        // --- AUTO-RESOLUCIÓN DEL SENDERID DENTRO DEL PLUGIN ---
-        // El plugin resuelve el ID del remitente porque 'bot.js' no pasa finalUserIdFromMain a la categoría 'Brainroots'.
-        const commandSenderId = msg.senderLid || msg.author; 
-        const senderOriginalJid = msg.author; // JID original del que ejecuta el comando (para menciones)
-        // --- FIN AUTO-RESOLUCIÓN ---
+    // -------------------------------------------------------------------------
+    // execute — lógica de todos los comandos
+    // -------------------------------------------------------------------------
+    async execute(sock, msg, args, commandName) {
+        // -- Resolución de IDs ------------------------------------------------
+        const commandSenderId = msg.senderLid || msg.author;
+        const senderOriginalJid = msg.author;
 
-        // --- VERIFICACIÓN CRÍTICA ---
         if (!commandSenderId) {
-            console.error(`[Brainroots ERROR] commandSenderId es NULL. Fallo en la resolución de ID para msg.author: ${senderOriginalJid}.`);
-            await msg.reply("❌ Hubo un problema al identificar tu usuario. No se puede procesar el comando. Intenta de nuevo.");
+            console.error(`[Brainroots ERROR] commandSenderId es NULL para author: ${senderOriginalJid}`);
+            await msg.reply('❌ Hubo un problema al identificar tu usuario. Inténtalo de nuevo.');
             return;
         }
-        // --- FIN VERIFICACIÓN ---
 
-        const chatJid = msg.from; // El JID del chat actual, ya sea grupo o privado
-        const chat = await msg.getChat(); // Para obtener metadata del grupo
-        const isGroup = chat.isGroup;
+        const chatJid          = msg.from;
+        const chat             = await msg.getChat();
+        const isGroup          = chat.isGroup;
         const groupParticipants = chat.groupMetadata?.participants || [];
-
-
-        // Obtenemos los datos del usuario que ejecuta el comando, pasando 'msg' para actualizar su pushname si es necesario
-        const user = await getUserData(commandSenderId, msg); 
-        const userNameToMention = user?.pushname || jidDecode(senderOriginalJid)?.user || senderOriginalJid.split('@')[0]; // Nombre para menciones/logs
+        const user             = await getUserData(commandSenderId, msg);
+        const userNameToMention = user?.pushname || senderOriginalJid.split('@')[0];
 
         if (!user) {
-            console.error(`[Brainroots Plugin] No se pudieron obtener los datos para ${commandSenderId}`);
-            try { await msg.reply("❌ Hubo un error al obtener tus datos. Inténtalo de nuevo."); } catch(e) {}
+            try { await msg.reply('❌ Hubo un error al obtener tus datos. Inténtalo de nuevo.'); } catch (e) {}
             return;
         }
 
-        // --- Bloque de Verificación de Registro (igual que en otros juegos) ---
+        // -- Verificación de registro -----------------------------------------
         if (!user.password) {
-            console.log(`[Brainroots CMD Debug] Usuario ${commandSenderId} no registrado o sin contraseña.`);
-            // Asegurarse de que el registro solo se inicie en grupos si es la intención
             if (!isGroup) {
-                await msg.reply("🔒 Comando exclusivo de grupos. Por favor, usa este comando en un grupo para iniciar tu registro o usar las funciones de economía.");
+                await msg.reply('🔒 Comando exclusivo de grupos.');
                 return;
             }
-            // Aquí usamos senderOriginalJid para la mención, que es el JID original del remitente
-            const actualSenderJid = senderOriginalJid; 
+            const prefix = msg.body.charAt(0);
+            const actualSenderJid = senderOriginalJid;
 
-            if (!user.phoneNumber) { // CASO A: Sin contraseña NI número
+            if (!user.phoneNumber) {
                 user.registration_state = 'esperando_numero_telefono';
-                await saveUserData(commandSenderId, user); 
-                console.log(`[Brainroots CMD Debug] Usuario ${commandSenderId} no tiene contraseña ni teléfono. Solicitando número.`);
-                const prefix = msg.body.charAt(0);
-                const replyText = `👋 ¡Hola, @${userNameToMention}!\n\nPara interactuar con los Brainroots, necesitas registrarte. Por favor, responde en este chat con:\n*${prefix}mifono +TuNumeroCompleto*`;
-                return sock.sendMessage(chatJid, { text: replyText, mentions: [actualSenderJid] }, { quoted: msg._baileysMessage });
-            } else { // CASO B: Tiene número pero NO contraseña
+                await saveUserData(commandSenderId, user);
+                return sock.sendMessage(chatJid, {
+                    text: `👋 ¡Hola, @${userNameToMention}!\n\nPara interactuar con los Brainroots, necesitas registrarte. Por favor, responde:\n*${prefix}mifono +TuNumeroCompleto*`,
+                    mentions: [actualSenderJid],
+                }, { quoted: msg._baileysMessage });
+            } else {
                 user.registration_state = 'esperando_contraseña_dm';
                 await saveUserData(commandSenderId, user);
-                
-                console.log(`[Brainroots CMD Debug] Usuario ${commandSenderId} tiene teléfono (+${user.phoneNumber}). Estado 'esperando_contraseña_dm' establecido.`);
-
-                let displayPhoneNumber = user.phoneNumber;
-                if (user.phoneNumber && !String(user.phoneNumber).startsWith('+')) {
-                    displayPhoneNumber = `+${user.phoneNumber}`;
-                }
-
+                let displayPhone = user.phoneNumber.startsWith('+') ? user.phoneNumber : `+${user.phoneNumber}`;
                 await sock.sendMessage(chatJid, {
-                    text: `🛡️ ¡Hola, @${userNameToMention}!\n\n` +
-                          `Ya tenemos tu número de teléfono registrado (*${displayPhoneNumber}*).\n` +
-                          `Ahora, para completar tu registro, te he enviado un mensaje privado (DM) a ese número para que configures tu contraseña. Por favor, revisa tus DMs.\n`+
-                          `‼️ Si quieres actualizar tu numero escribe .actualizarfono +52111222333 RECUERDA INCLUIR TODO TU NUMERO Y CODIGO DE PAIS\n`,
-                    mentions: [actualSenderJid]
+                    text: `🛡️ ¡Hola, @${userNameToMention}!\n\nYa tenemos tu número (*${displayPhone}*). Te enviamos un DM para que configures tu contraseña.\n‼️ Para actualizar tu número: .actualizarfono +52111222333`,
+                    mentions: [actualSenderJid],
                 }, { quoted: msg._baileysMessage });
-                
-                const dmChatJidToSendTo = `${user.phoneNumber}@s.whatsapp.net`;
-                const dmMessageContent = "🔑 Por favor, responde a este mensaje con la contraseña que deseas establecer para los comandos de economía.";
-                
-                console.log(`[Brainroots Plugin DM DEBUG] Intentando enviar DM para contraseña a ${dmChatJidToSendTo}.`);
+                const dmJid = `${user.phoneNumber}@s.whatsapp.net`;
                 try {
-                    await sock.sendMessage(dmChatJidToSendTo, { text: dmMessageContent });
-                    console.log(`[Brainroots Plugin DM SUCCESS] DM para contraseña enviado a ${dmChatJidToSendTo}.`);
-                } catch(dmError){
-                    console.error(`[Brainroots Plugin DM ERROR] Error enviando DM a ${dmChatJidToSendTo}:`, dmError);
+                    await sock.sendMessage(dmJid, { text: '🔑 Por favor, responde con la contraseña que deseas establecer para los comandos de economía.' });
+                } catch (dmErr) {
+                    console.error(`[Brainroots] Error enviando DM a ${dmJid}:`, dmErr);
                     await sock.sendMessage(chatJid, {
-                        text: `⚠️ @${userNameToMention}, no pude enviarte el DM para la contraseña. Asegúrate de que puedes recibir mensajes de este número.`,
-                        mentions: [actualSenderJid]
+                        text: `⚠️ @${userNameToMention}, no pude enviarte el DM. Asegúrate de poder recibir mensajes de este número.`,
+                        mentions: [actualSenderJid],
                     }, { quoted: msg._baileysMessage });
                 }
                 return;
             }
         }
-        // --- Fin Bloque de Verificación de Registro ---
 
-
-        // --- Lógica para el COMANDO DE SPAWN (.brspawn o .spawnbr) ---
+        // =====================================================================
+        // COMANDO: .brspawn / .spawnbr
+        // =====================================================================
         if (['brspawn', 'spawnbr'].includes(commandName)) {
-            console.log(`[Brainroots CMD Debug] Procesando comando de spawn '${commandName}' por ${commandSenderId} en chat ${chatJid}.`);
-
             const now = Date.now();
+
             if (now - (user.lastbrainrootspawn || 0) < COOLDOWN_SPAWN_COMMAND_MS) {
-                const timeLeft = COOLDOWN_SPAWN_COMMAND_MS - (now - (user.lastbrainrootspawn || 0));
-                console.log(`[Brainroots CMD Debug] Cooldown activo para ${commandSenderId}. Tiempo restante: ${msToTime(timeLeft)}`);
-                return msg.reply(`⏳ Ya has invocado un Brainroot recientemente. Espera ${msToTime(timeLeft)} para intentarlo de nuevo.`);
+                const left = COOLDOWN_SPAWN_COMMAND_MS - (now - (user.lastbrainrootspawn || 0));
+                return msg.reply(`⏳ Ya invocaste un Brainroot recientemente. Espera ${msToTime(left)}.`);
             }
 
-            // Si ya hay un personaje activo en este CHAT, no spawnea otro.
-            if (currentSpawnedCharacter && currentSpawnedCharacter.spawnedJid === chatJid) {
-                console.log(`[Brainroots CMD Debug] Ya hay un Brainroot activo ('${currentSpawnedCharacter.name}') en este chat.`);
-                return msg.reply(`🤷‍♂️ Ya hay un Brainroot activo ('${currentSpawnedCharacter.name}') esperando ser atrapado en este chat. ¡Date prisa o escapará!`);
+            if (currentSpawnedCharacter?.spawnedJid === chatJid) {
+                return msg.reply(`🤷‍♂️ Ya hay un Brainroot activo ('${currentSpawnedCharacter.name}') en este chat.`);
             }
 
             const characterToSpawn = chooseCharacterByRarity();
             if (!characterToSpawn) {
-                console.warn("[Brainroots Spawn] No hay personajes válidos para aparecer (chooseCharacterByRarity retornó nulo).");
-                return msg.reply('❌ No hay personajes Brainroots disponibles para aparecer. Revisa la configuración del bot.');
+                return msg.reply('❌ No hay personajes Brainroots disponibles. Revisa la configuración del bot.');
             }
 
-            currentSpawnedCharacter = { ...characterToSpawn, spawnedJid: chatJid }; // Asociar el spawn a este chat
+            currentSpawnedCharacter = { ...characterToSpawn, spawnedJid: chatJid };
+
+            // -- Auto-descarga de asset si no existe --------------------------
             const imagePath = path.join(ASSETS_BRAINROOTS_DIR, characterToSpawn.image_filename);
-            
             if (!fs.existsSync(imagePath)) {
-                console.error(`[Brainroots Spawn] ERROR: Imagen no encontrada para ${characterToSpawn.name} en la ruta: ${imagePath}.`);
-                currentSpawnedCharacter = null;
-                return msg.reply('❌ ¡Parece que no encuentro la imagen de este Brainroot! Contacta a un administrador.');
+                const remoteUrl = `${CLOUD_ASSETS_BASE_URL}/${characterToSpawn.image_filename}`;
+                console.log(`[Brainroots] Imagen no encontrada localmente. Descargando: ${remoteUrl}`);
+                try {
+                    await downloadAsset(remoteUrl, imagePath);
+                    console.log(`[Brainroots] Asset descargado correctamente: ${imagePath}`);
+                } catch (dlErr) {
+                    console.error(`[Brainroots] Error al descargar asset para ${characterToSpawn.name}:`, dlErr.message);
+                    currentSpawnedCharacter = null;
+                    return msg.reply('❌ No pude obtener la imagen de este Brainroot. Inténtalo de nuevo.');
+                }
             }
 
             try {
                 const imageBuffer = fs.readFileSync(imagePath);
-                const rarityText = `Rareza: ${currentSpawnedCharacter.rarity}/5`;
-                const priceText = `Precio: ${MONEY_SYMBOL}${currentSpawnedCharacter.price.toLocaleString()}`;
-                const caption = `¡Un Brainroot salvaje apareció! 💥\n*${currentSpawnedCharacter.name}*\n${rarityText}\n${priceText}\n\nTienes *${CATCH_WINDOW_MS / 1000} segundos* para atraparlo con: \`.claim\``;
+                const caption = `¡Un Brainroot salvaje apareció! 💥\n*${currentSpawnedCharacter.name}*\nRareza: ${currentSpawnedCharacter.rarity}/5\nPrecio: ${MONEY_SYMBOL}${currentSpawnedCharacter.price.toLocaleString()}\n\nTienes *${CATCH_WINDOW_MS / 1000} segundos* para atraparlo con: \`.claim\``;
 
-                console.log(`[Brainroots Spawn] Enviando '${currentSpawnedCharacter.name}' al chat: ${chatJid}`);
-                await sock.sendMessage(chatJid, {
-                    image: imageBuffer,
-                    caption: caption
-                });
-                console.log(`[Brainroots Spawn] '${currentSpawnedCharacter.name}' enviado con éxito a ${chatJid}.`);
+                await sock.sendMessage(chatJid, { image: imageBuffer, caption });
 
-                user.lastbrainrootspawn = now; // Guardar el tiempo de uso del comando
-                await saveUserData(commandSenderId, user); // Guarda por el ID resuelto del remitente
+                user.lastbrainrootspawn = now;
+                await saveUserData(commandSenderId, user);
 
-                // Establecer el temporizador para limpiar el personaje si no es atrapado
                 catchTimer = setTimeout(() => {
-                    if (currentSpawnedCharacter && currentSpawnedCharacter.id === characterToSpawn.id && currentSpawnedCharacter.spawnedJid === chatJid) {
-                        console.log(`[Brainroots Spawn] Tiempo agotado para '${characterToSpawn.name}'. Escapó del chat ${chatJid}.`);
-                        sock.sendMessage(chatJid, {
-                            text: `⏰ ¡Tiempo agotado! El Brainroot '${characterToSpawn.name}' escapó...`
-                        });
+                    if (currentSpawnedCharacter?.id === characterToSpawn.id && currentSpawnedCharacter.spawnedJid === chatJid) {
+                        sock.sendMessage(chatJid, { text: `⏰ ¡Tiempo agotado! El Brainroot '${characterToSpawn.name}' escapó...` });
                         currentSpawnedCharacter = null;
-                    } else {
-                        console.log(`[Brainroots Spawn] Temporizador para Brainroot '${characterToSpawn.name}' en ${chatJid} finalizado, pero ya fue atrapado o limpiado.`);
                     }
                 }, CATCH_WINDOW_MS);
-                console.log(`[Brainroots Spawn] Temporizador de captura de ${CATCH_WINDOW_MS / 1000}s iniciado para '${currentSpawnedCharacter.name}' en ${chatJid}.`);
 
-            } catch (error) {
-                console.error("[Brainroots Spawn] Error al enviar el Brainroot o configurar el temporizador:", error);
-                if (error.stack) console.error(error.stack);
+                console.log(`[Brainroots] '${currentSpawnedCharacter.name}' spawneado en ${chatJid}. Timer: ${CATCH_WINDOW_MS / 1000}s.`);
+            } catch (err) {
+                console.error('[Brainroots] Error enviando spawn:', err);
                 currentSpawnedCharacter = null;
-                if (catchTimer) clearTimeout(catchTimer);
-                catchTimer = null;
-                return msg.reply('❌ Ocurrió un error al intentar que apareciera un Brainroot. Inténtalo de nuevo más tarde.');
+                if (catchTimer) { clearTimeout(catchTimer); catchTimer = null; }
+                return msg.reply('❌ Ocurrió un error al intentar que apareciera un Brainroot.');
             }
             return;
         }
 
-
-        // --- Lógica para el COMANDO DE COMPRA (.brainrootcomprar o .claim) ---
+        // =====================================================================
+        // COMANDO: .brainrootcomprar / .claim
+        // =====================================================================
         if (['brainrootcomprar', 'claim'].includes(commandName)) {
-            console.log(`[Brainroots CMD Debug] Entrando a lógica de ${commandName} para ${commandSenderId} en chat ${chatJid}. Args: ${args.join(' ')}`);
-            
             if (!currentSpawnedCharacter || currentSpawnedCharacter.spawnedJid !== chatJid) {
-                console.log(`[Brainroots CMD Debug] No hay Brainroot activo en este chat o no fue spawneado aquí. Respondiendo...`);
-                return msg.reply('🤷‍♂️ No hay ningún Brainroot activo para atrapar en este momento en este chat.');
+                return msg.reply('🤷‍♂️ No hay ningún Brainroot activo para atrapar en este chat.');
             }
 
-            let guessedName = null;
-            let isClaimCommand = (commandName === 'claim');
+            if (catchTimer === null) {
+                return msg.reply('⏰ ¡Demasiado tarde! El Brainroot ya escapó o fue atrapado.');
+            }
 
-            if (isClaimCommand) {
-                guessedName = currentSpawnedCharacter.name;
-                console.log(`[Brainroots CMD Debug] Comando .claim usado. Nombre asumido: '${guessedName}'`);
-            } else {
-                console.log(`[Brainroots CMD Debug] args[0]: ${args[0]}`);
-                if (!args[0]) {
-                    console.log(`[Brainroots CMD Debug] No se especificó nombre. Respondiendo...`);
-                    return msg.reply('🤔 ¡Debes especificar el nombre del Brainroot que quieres atrapar! Ejemplo: `.brainrootcomprar [nombre]`');
-                }
-                guessedName = args.join(' ').trim();
-                console.log(`[Brainroots CMD Debug] Nombre adivinado: '${guessedName}', Nombre esperado: '${currentSpawnedCharacter.name}'`);
+            if (commandName !== 'claim') {
+                const guessedName = args.join(' ').trim();
+                if (!guessedName) return msg.reply('🤔 Especifica el nombre del Brainroot. Ej: `.brainrootcomprar [nombre]`');
                 if (guessedName.toLowerCase() !== currentSpawnedCharacter.name.toLowerCase()) {
-                    console.log(`[Brainroots CMD Debug] Nombre incorrecto. Respondiendo...`);
                     return msg.reply('❌ Nombre incorrecto. Intenta de nuevo.');
                 }
             }
-            
-            console.log(`[Brainroots CMD Debug] catchTimer: ${catchTimer}`);
-            if (catchTimer === null) {
-                 console.log(`[Brainroots CMD Debug] Catch timer es nulo, demasiado tarde. Respondiendo...`);
-                 return msg.reply('⏰ ¡Demasiado tarde! El Brainroot ya escapó o fue atrapado.');
-            }
 
-            // Verificar dinero del usuario
-            console.log(`[Brainroots CMD Debug] User money: ${user.money}, Brainroot price: ${currentSpawnedCharacter.price}`);
             if (user.money < currentSpawnedCharacter.price) {
-                console.log(`[Brainroots CMD Debug] Dinero insuficiente. Respondiendo...`);
                 return msg.reply(`💸 No tienes suficiente dinero (${MONEY_SYMBOL}${user.money.toLocaleString()}) para atrapar a *${currentSpawnedCharacter.name}* (Costo: ${MONEY_SYMBOL}${currentSpawnedCharacter.price.toLocaleString()}).`);
             }
 
-            // Si todo es válido:
-            // 1. Deducir dinero
-            console.log(`[Brainroots CMD Debug] Todas las validaciones pasaron. Deduciendo dinero y añadiendo a colección.`);
             user.money -= currentSpawnedCharacter.price;
-            await saveUserData(commandSenderId, user); // Guarda por el ID resuelto del remitente
+            await saveUserData(commandSenderId, user);
 
-            // 2. Añadir a la colección del usuario
-            const added = await addBrainrootsToUser(commandSenderId, currentSpawnedCharacter.id);
-
+            const added = dbLogic.addToUser(commandSenderId, currentSpawnedCharacter.id);
             if (added) {
-                console.log(`[Brainroots CMD Debug] Brainroot ${currentSpawnedCharacter.name} añadido a la colección de ${userNameToMention}. Enviando confirmación.`);
-                sock.sendMessage(chatJid, { // Usar chatJid para responder en el mismo chat
-                    text: `🎉 ¡Felicidades, @${userNameToMention}! Has atrapado a *${currentSpawnedCharacter.name}* por ${MONEY_SYMBOL}${currentSpawnedCharacter.price.toLocaleString()} y lo has añadido a tu colección.`,
-                    mentions: [senderOriginalJid] // Mencionar con el JID original
+                await sock.sendMessage(chatJid, {
+                    text: `🎉 ¡Felicidades, @${userNameToMention}! Atrapaste a *${currentSpawnedCharacter.name}* por ${MONEY_SYMBOL}${currentSpawnedCharacter.price.toLocaleString()} y lo añadiste a tu colección.`,
+                    mentions: [senderOriginalJid],
                 }, { quoted: msg._baileysMessage });
-
-                const capturedBrainrootName = currentSpawnedCharacter.name;
+                console.log(`[Brainroots] ${userNameToMention} atrapó a ${currentSpawnedCharacter.name}.`);
                 currentSpawnedCharacter = null;
                 clearTimeout(catchTimer);
                 catchTimer = null;
-                console.log(`[Brainroots Catch] ${userNameToMention} atrapó a ${capturedBrainrootName}.`);
-
             } else {
-                console.log(`[Brainroots CMD Debug] Falló addBrainrootsToUser por alguna razón desconocida.`);
                 await msg.reply('❌ Ocurrió un error al añadir el Brainroot a tu colección.');
             }
             return;
         }
 
-        // --- Lógica para el COMANDO DE COLECCIÓN (.mybr, .misbr, .brainrootscollection) ---
+        // =====================================================================
+        // COMANDO: .mybr / .misbr / .brainrootscollection
+        // =====================================================================
         if (['mybr', 'misbr', 'brainrootscollection'].includes(commandName)) {
-            console.log(`[Brainroots CMD Debug] Procesando comando de colección '${commandName}' por ${commandSenderId}. Args: ${args.join(' ')}`);
+            let targetDbId        = commandSenderId;
+            let targetJidForMention = senderOriginalJid;
+            let targetDisplayName = userNameToMention;
 
-            let targetDbId = commandSenderId; // ID para buscar en la BD (LID o JID)
-            let targetJidForMention = senderOriginalJid; // JID para la mención visual y getUserData si es self
-            let targetDisplayName = userNameToMention; // Nombre a mostrar
-
-            // Verificar si se mencionó a otro usuario o se usó @manual
             const mentionedJids = msg.mentionedJidList || [];
             if (mentionedJids.length > 0) {
-                const rawMentionedJid = mentionedJids[0];
-                targetJidForMention = rawMentionedJid; // JID original del mencionado
+                const raw = mentionedJids[0];
+                targetJidForMention = raw;
                 if (isGroup) {
-                    const mentionedParticipant = groupParticipants.find(p => p.id === rawMentionedJid);
-                    targetDbId = (mentionedParticipant && mentionedParticipant.lid) ? mentionedParticipant.lid : rawMentionedJid;
-                    // console.log(`[Brainroots CMD Debug] Colección: Target DB ID resuelto: ${targetDbId}`);
+                    const p = groupParticipants.find(x => x.id === raw);
+                    targetDbId = (p?.lid) ? p.lid : raw;
                 } else {
-                    targetDbId = rawMentionedJid;
+                    targetDbId = raw;
                 }
-                const mentionedUser = await getUserData(targetDbId);
-                targetDisplayName = mentionedUser?.pushname || jidDecode(rawMentionedJid)?.user || rawMentionedJid.split('@')[0];
-                console.log(`[Brainroots CMD Debug] Colección solicitada para usuario mencionado: ${targetDbId} (${targetDisplayName})`);
-            } else if (args[0] && args[0].startsWith('@')) {
-                // Parche si la mención no fue detectada por Baileys pero el formato @numero fue usado
+                const tUser = await getUserData(targetDbId);
+                targetDisplayName = tUser?.pushname || raw.split('@')[0];
+            } else if (args[0]?.startsWith('@')) {
                 const numPart = args[0].substring(1).split('@')[0];
-                targetJidForMention = numPart + '@s.whatsapp.net';
+                targetJidForMention = `${numPart}@s.whatsapp.net`;
                 if (isGroup) {
-                    const mentionedParticipant = groupParticipants.find(p => p.id === targetJidForMention);
-                    targetDbId = (mentionedParticipant && mentionedParticipant.lid) ? mentionedParticipant.lid : targetJidForMention;
+                    const p = groupParticipants.find(x => x.id === targetJidForMention);
+                    targetDbId = (p?.lid) ? p.lid : targetJidForMention;
                 } else {
                     targetDbId = targetJidForMention;
                 }
-                const mentionedUser = await getUserData(targetDbId);
-                targetDisplayName = mentionedUser?.pushname || jidDecode(targetJidForMention)?.user || targetJidForMention.split('@')[0];
-                console.log(`[Brainroots CMD Debug] Colección solicitada para usuario por @manual: ${targetDbId} (${targetDisplayName})`);
+                const tUser = await getUserData(targetDbId);
+                targetDisplayName = tUser?.pushname || numPart;
             }
 
-            const userCharacters = await getUserBrainroots(targetDbId); // Obtiene cada entrada individual
+            const userCharacters = dbLogic.getUserCollection(targetDbId);
 
             if (userCharacters.length === 0) {
-                console.log(`[Brainroots CMD Debug] Usuario ${targetDbId} no tiene Brainroots.`);
                 if (targetDbId === commandSenderId) {
-                    return msg.reply('🌿 Aún no tienes ningún Brainroot. ¡Usa `.brspawn` para que aparezca uno y atrápalo!');
-                } else {
-                    return sock.sendMessage(chatJid, { text: `🌿 @${targetDisplayName} aún no tiene ningún Brainroot.`, mentions: [targetJidForMention] }, { quoted: msg._baileysMessage });
+                    return msg.reply('🌿 Aún no tienes ningún Brainroot. ¡Usa `.brspawn` para que aparezca uno!');
                 }
+                return sock.sendMessage(chatJid, { text: `🌿 @${targetDisplayName} aún no tiene ningún Brainroot.`, mentions: [targetJidForMention] }, { quoted: msg._baileysMessage });
             }
 
-            let collectionMessage = `*🌱 Colección de Brainroots de @${targetDisplayName}:*\n\n`; // Usar @ para mención
+            const now = Date.now();
+            const grouped = {};
             let totalPotentialIncome = 0;
 
-            const now = Date.now();
-            const groupedCharacters = {};
-
-            userCharacters.forEach(char => {
-                if (!groupedCharacters[char.name]) {
-                    groupedCharacters[char.name] = {
-                        name: char.name,
-                        rarity: char.rarity,
-                        price: char.price,
-                        quantity: 0,
-                        accumulatedIncome: 0,
-                    };
+            for (const char of userCharacters) {
+                if (!grouped[char.name]) {
+                    grouped[char.name] = { name: char.name, rarity: char.rarity, price: char.price, quantity: 0, accumulatedIncome: 0 };
                 }
-                groupedCharacters[char.name].quantity++;
-
-                const timeSinceLastIncome = now - (char.last_income_timestamp || char.catch_timestamp);
-                let intervalsPassed = Math.floor(timeSinceLastIncome / INCOME_INTERVAL_MS);
-
+                grouped[char.name].quantity++;
+                const timeSince       = now - (char.last_income_timestamp || char.catch_timestamp);
+                const intervalsPassed = Math.floor(timeSince / INCOME_INTERVAL_MS);
                 if (intervalsPassed > 0) {
-                    const incomePerInterval = Math.floor(char.price * INCOME_PERCENTAGE_PER_INTERVAL);
-                    const incomeReady = incomePerInterval * intervalsPassed;
-                    groupedCharacters[char.name].accumulatedIncome += incomeReady;
-                    totalPotentialIncome += incomeReady;
+                    const income = Math.floor(char.price * INCOME_PERCENTAGE_PER_INTERVAL) * intervalsPassed;
+                    grouped[char.name].accumulatedIncome += income;
+                    totalPotentialIncome += income;
                 }
-            });
-
-            const orderedGroupedCharacters = Object.values(groupedCharacters).sort((a, b) => {
-                if (b.rarity !== a.rarity) return b.rarity - a.rarity;
-                return a.name.localeCompare(b.name);
-            });
-
-
-            orderedGroupedCharacters.forEach(char => {
-                collectionMessage += `• *${char.name}* x${char.quantity} (Rareza: ${char.rarity}/5, Precio: ${MONEY_SYMBOL}${char.price.toLocaleString()})`;
-                if (char.accumulatedIncome > 0) {
-                    collectionMessage += ` -> ${MONEY_SYMBOL}${char.accumulatedIncome.toLocaleString()} listo`;
-                }
-                collectionMessage += `\n`;
-            });
-            
-            if (totalPotentialIncome > 0 && targetDbId === commandSenderId) {
-                collectionMessage += `\n*💰 Ingreso total listo para reclamar: ${MONEY_SYMBOL}${totalPotentialIncome.toLocaleString()}*`;
-                collectionMessage += `\nUsa \`.brincome\` para reclamarlo.`;
-            } else if (totalPotentialIncome > 0) {
-                collectionMessage += `\n_💰 Este usuario tiene un ingreso de ${MONEY_SYMBOL}${totalPotentialIncome.toLocaleString()} listo para reclamar._`;
-            } else {
-                collectionMessage += `\n_No hay ingresos listos para reclamar todavía._`;
             }
 
-            console.log(`[Brainroots CMD Debug] Enviando colección de ${targetDisplayName} a ${commandSenderId}.`);
-            return sock.sendMessage(chatJid, { text: collectionMessage, mentions: [targetJidForMention] }, { quoted: msg._baileysMessage });
+            const sorted = Object.values(grouped).sort((a, b) => b.rarity - a.rarity || a.name.localeCompare(b.name));
+            let msg_text = `*🌱 Colección de Brainroots de @${targetDisplayName}:*\n\n`;
+            for (const c of sorted) {
+                msg_text += `• *${c.name}* x${c.quantity} (Rareza: ${c.rarity}/5, Precio: ${MONEY_SYMBOL}${c.price.toLocaleString()})`;
+                if (c.accumulatedIncome > 0) msg_text += ` → ${MONEY_SYMBOL}${c.accumulatedIncome.toLocaleString()} listo`;
+                msg_text += '\n';
+            }
+
+            if (totalPotentialIncome > 0 && targetDbId === commandSenderId) {
+                msg_text += `\n*💰 Ingreso total listo: ${MONEY_SYMBOL}${totalPotentialIncome.toLocaleString()}*\nUsa \`.brincome\` para reclamarlo.`;
+            } else if (totalPotentialIncome > 0) {
+                msg_text += `\n_💰 Ingreso listo de ${MONEY_SYMBOL}${totalPotentialIncome.toLocaleString()}._`;
+            } else {
+                msg_text += '\n_No hay ingresos listos todavía._';
+            }
+
+            return sock.sendMessage(chatJid, { text: msg_text, mentions: [targetJidForMention] }, { quoted: msg._baileysMessage });
         }
 
-        // --- Lógica para el COMANDO DE RECLAMAR INGRESO (.brincome o .claimbr) ---
+        // =====================================================================
+        // COMANDO: .brincome / .claimbr
+        // =====================================================================
         if (['brincome', 'claimbr'].includes(commandName)) {
-            console.log(`[Brainroots CMD Debug] Procesando comando de reclamo de ingreso '${commandName}' para ${commandSenderId}.`);
-            const userCharacters = await getUserBrainroots(commandSenderId);
+            const userCharacters = dbLogic.getUserCollection(commandSenderId);
+            if (userCharacters.length === 0) return msg.reply('🌿 Aún no tienes ningún Brainroot para generar ingresos.');
 
-            if (userCharacters.length === 0) {
-                return msg.reply('🌿 Aún no tienes ningún Brainroot para generar ingresos.');
-            }
-
-            let totalClaimedIncome = 0;
             const now = Date.now();
-            const updatedTimestamps = [];
+            let totalClaimed = 0;
 
             for (const char of userCharacters) {
-                const timeSinceLastIncome = now - (char.last_income_timestamp || char.catch_timestamp);
-                let intervalsPassed = Math.floor(timeSinceLastIncome / INCOME_INTERVAL_MS);
-
+                const timeSince       = now - (char.last_income_timestamp || char.catch_timestamp);
+                const intervalsPassed = Math.floor(timeSince / INCOME_INTERVAL_MS);
                 if (intervalsPassed > 0) {
-                    const incomePerInterval = Math.floor(char.price * INCOME_PERCENTAGE_PER_INTERVAL);
-                    const incomeToClaim = incomePerInterval * intervalsPassed;
-                    totalClaimedIncome += incomeToClaim;
-
-                    // Actualizar a 'now' para el nuevo cooldown
-                    updatedTimestamps.push(updateBrainrootIncomeTimestamp(char.user_brainroot_entry_id, now)); 
+                    totalClaimed += Math.floor(char.price * INCOME_PERCENTAGE_PER_INTERVAL) * intervalsPassed;
+                    dbLogic.updateIncomeTimestamp(char.user_brainroot_entry_id, now);
                 }
             }
 
-            await Promise.all(updatedTimestamps);
-
-            if (totalClaimedIncome > 0) {
-                user.money += totalClaimedIncome;
+            if (totalClaimed > 0) {
+                user.money += totalClaimed;
                 await saveUserData(commandSenderId, user);
-                console.log(`[Brainroots CMD Debug] ${userNameToMention} reclamó ${totalClaimedIncome} de Brainroots.`);
                 return sock.sendMessage(chatJid, {
-                    text: `💰 ¡Felicidades, @${userNameToMention}! Has reclamado *${MONEY_SYMBOL}${totalClaimedIncome.toLocaleString()}* de tus Brainroots.\nTu nuevo saldo: ${MONEY_SYMBOL}${user.money.toLocaleString()}`,
-                    mentions: [senderOriginalJid] // Mencionar con el JID original
+                    text: `💰 ¡@${userNameToMention} reclamó *${MONEY_SYMBOL}${totalClaimed.toLocaleString()}* de sus Brainroots!\nNuevo saldo: ${MONEY_SYMBOL}${user.money.toLocaleString()}`,
+                    mentions: [senderOriginalJid],
                 }, { quoted: msg._baileysMessage });
-            } else {
-                console.log(`[Brainroots CMD Debug] ${userNameToMention} intentó reclamar pero no había ingresos disponibles.`);
-                return msg.reply('_No hay ingresos listos para reclamar de tus Brainroots todavía. Espera un poco más._');
             }
+            return msg.reply('_No hay ingresos listos para reclamar todavía. Espera un poco más._');
         }
 
-        // --- Lógica para el COMANDO DE REGALAR (.brgift o .regalarbr) ---
+        // =====================================================================
+        // COMANDO: .brgift / .regalarbr
+        // =====================================================================
         if (['brgift', 'regalarbr'].includes(commandName)) {
-            console.log(`[Brainroots CMD Debug] Procesando comando de regalo '${commandName}' por ${commandSenderId} en chat ${chatJid}. Args: ${args.join(' ')}`);
+            if (args.length < 2) return msg.reply('🤔 Uso: `.brgift @usuario [Nombre del Brainroot]`');
 
-            // Validación: Mínimo 2 argumentos (@usuario y Nombre del Brainroot)
-            if (args.length < 2) {
-                return msg.reply('🤔 Uso: `.brgift @usuario [Nombre del Brainroot]`. Ejemplo: `.brgift @51987654321 Snorlax`');
-            }
-
-            // 1. Identificar al destinatario (JID mencionado o por @manual)
             const mentionedJids = msg.mentionedJidList || [];
-            let rawTargetJid = null; // El JID original del destinatario
-            let targetDbId = null; // El LID o JID para la DB
-
-            if (mentionedJids.length > 0) {
-                rawTargetJid = mentionedJids[0];
-            } else if (args[0].startsWith('@')) {
-                const numPart = args[0].substring(1).split('@')[0];
-                rawTargetJid = numPart + '@s.whatsapp.net';
+            let rawTargetJid = mentionedJids[0] ?? null;
+            if (!rawTargetJid && args[0]?.startsWith('@')) {
+                rawTargetJid = `${args[0].substring(1).split('@')[0]}@s.whatsapp.net`;
             }
+            if (!rawTargetJid) return msg.reply('❌ Debes mencionar al destinatario. Ej: `.brgift @usuario NombreBR`');
 
-            if (!rawTargetJid) {
-                return msg.reply('❌ Debes mencionar o escribir el JID completo del usuario al que quieres regalar el Brainroot (ej. `@51987654321 BrainrootName`).');
-            }
-            
-            // Resolvemos el targetId para la DB
+            let targetDbId = rawTargetJid;
             if (isGroup) {
-                const targetParticipant = groupParticipants.find(p => p.id === rawTargetJid);
-                targetDbId = (targetParticipant && targetParticipant.lid) ? targetParticipant.lid : rawTargetJid;
-            } else {
-                targetDbId = rawTargetJid;
+                const p = groupParticipants.find(x => x.id === rawTargetJid);
+                targetDbId = p?.lid ?? rawTargetJid;
             }
 
-            if (targetDbId === commandSenderId) {
-                return msg.reply('😂 No puedes regalarte un Brainroot a ti mismo. ¡Ya lo tienes!');
-            }
-            // Asegurarse de que el destinatario esté registrado para evitar errores
+            if (targetDbId === commandSenderId) return msg.reply('😂 No puedes regalarte un Brainroot a ti mismo.');
+
             const targetUser = await getUserData(targetDbId);
-            if (!targetUser) {
-                return msg.reply(`❌ No pude encontrar los datos del usuario destinatario (@${rawTargetJid.split('@')[0]}). Asegúrate de que esté registrado en el bot.`);
-            }
-            const targetUserName = targetUser?.pushname || jidDecode(rawTargetJid)?.user || rawTargetJid.split('@')[0];
+            if (!targetUser) return msg.reply(`❌ No pude encontrar los datos del destinatario.`);
+            const targetUserName = targetUser?.pushname || rawTargetJid.split('@')[0];
 
+            const brainrootNameArgs = args.filter((a, i) => !(i === 0 && a.startsWith('@')));
+            const brainrootName     = brainrootNameArgs.join(' ').trim();
+            if (!brainrootName) return msg.reply('🤔 ¿Qué Brainroot quieres regalar? Ej: `.brgift @usuario Nombre`');
 
-            // 2. Identificar el nombre del Brainroot (el resto de los argumentos)
-            // Filtramos el argumento que es el @mencionado para obtener solo el nombre del brainroot
-            const brainrootNameArgs = args.filter(arg => !arg.startsWith('@') || (mentionedJids.length > 0 && arg !== args[0]));
-            const brainrootName = brainrootNameArgs.join(' ').trim();
+            const characterToGift = dbLogic.getCharacterByName(brainrootName);
+            if (!characterToGift) return msg.reply(`❌ No conozco ningún Brainroot llamado *${brainrootName}*.`);
 
-            if (!brainrootName) {
-                return msg.reply('🤔 ¿Qué Brainroot quieres regalar? Uso: `.brgift @usuario [Nombre del Brainroot]`');
-            }
+            const senderColl    = dbLogic.getUserCollection(commandSenderId);
+            const senderHasIt   = senderColl.some(c => c.id === characterToGift.id);
+            if (!senderHasIt) return msg.reply(`🤷‍♀️ No tienes *${characterToGift.name}* en tu colección.`);
 
-            // 3. Buscar el Brainroot por nombre
-            const characterToGift = await getBrainrootsCharacterByName(brainrootName);
-            if (!characterToGift) {
-                return msg.reply(`❌ No conozco ningún Brainroot llamado *${brainrootName}*. Verifica el nombre.`);
-            }
+            const removed = dbLogic.removeFromUser(commandSenderId, characterToGift.id);
+            if (!removed) return msg.reply('❌ Error al eliminar el Brainroot de tu inventario. Inténtalo de nuevo.');
 
-            // 4. Verificar si el remitente tiene el Brainroot
-            const senderCollection = await getUserBrainroots(commandSenderId);
-            const senderHasBrainroot = senderCollection.some(char => char.id === characterToGift.id);
+            dbLogic.addToUser(targetDbId, characterToGift.id);
 
-            if (!senderHasBrainroot) {
-                return msg.reply(`🤷‍♀️ No tienes *${characterToGift.name}* en tu colección para regalar.`);
-            }
-
-            // 5. Eliminar del remitente
-            const removed = await removeBrainrootFromUser(commandSenderId, characterToGift.id);
-            if (!removed) {
-                console.error(`[Brainroots CMD Debug] Error inesperado al intentar eliminar ${characterToGift.name} de ${commandSenderId}.`);
-                return msg.reply('❌ Ocurrió un error al intentar eliminar el Brainroot de tu inventario. Inténtalo de nuevo.');
-            }
-
-            // 6. Añadir al destinatario
-            const added = await addBrainrootsToUser(targetDbId, characterToGift.id);
-            if (!added) {
-                console.error(`[Brainroots CMD Debug] Error inesperado al intentar añadir ${characterToGift.name} a ${targetDbId}.`);
-                // Si falla aquí, deberíamos intentar devolverlo al remitente para no perderlo. (Lógica avanzada de rollback)
-                return msg.reply('❌ Ocurrió un error al añadir el Brainroot al destinatario. El regalo no pudo completarse.');
-            }
-
-            // 7. Mensaje de confirmación
-            console.log(`[Brainroots CMD Debug] ${userNameToMention} regaló ${characterToGift.name} a ${targetUserName}.`);
+            console.log(`[Brainroots] ${userNameToMention} regaló ${characterToGift.name} a ${targetUserName}.`);
             await sock.sendMessage(chatJid, {
-                text: `🎁 ¡@${userNameToMention} le ha regalado un *${characterToGift.name}* a @${targetUserName}! ¡Qué generoso/a!`,
-                mentions: [senderOriginalJid, rawTargetJid] // Mencionar con JIDs originales
+                text: `🎁 ¡@${userNameToMention} le regaló un *${characterToGift.name}* a @${targetUserName}! ¡Qué generoso/a!`,
+                mentions: [senderOriginalJid, rawTargetJid],
             }, { quoted: msg._baileysMessage });
-
             return;
         }
 
-
-        // --- Lógica para el COMANDO DE ROBO (.brrob o .robarbr) ---
+        // =====================================================================
+        // COMANDO: .brrob / .robarbr
+        // =====================================================================
         if (['brrob', 'robarbr'].includes(commandName)) {
-            console.log(`[Brainroots CMD Debug] Procesando comando de robo '${commandName}' por ${commandSenderId} en chat ${chatJid}. Args: ${args.join(' ')}`);
-
-            if (args.length < 1) {
-                return msg.reply('🤔 Uso: `.brrob @usuario`. Intenta robar un Brainroot a otro usuario.');
-            }
+            if (args.length < 1) return msg.reply('🤔 Uso: `.brrob @usuario`');
 
             const mentionedJids = msg.mentionedJidList || [];
-            let rawTargetJid = null; // El JID original del destinatario
-            let targetDbId = null; // El LID o JID para la DB
-
-            if (mentionedJids.length > 0) {
-                rawTargetJid = mentionedJids[0];
-            } else if (args[0].startsWith('@')) {
-                const numPart = args[0].substring(1).split('@')[0];
-                rawTargetJid = numPart + '@s.whatsapp.net';
+            let rawTargetJid = mentionedJids[0] ?? null;
+            if (!rawTargetJid && args[0]?.startsWith('@')) {
+                rawTargetJid = `${args[0].substring(1).split('@')[0]}@s.whatsapp.net`;
             }
+            if (!rawTargetJid) return msg.reply('❌ Debes mencionar al usuario al que quieres robar.');
 
-            if (!rawTargetJid) {
-                return msg.reply('❌ Debes mencionar o escribir el JID completo del usuario al que quieres robar.');
-            }
-
-            // Resolvemos el targetId para la DB
+            let targetDbId = rawTargetJid;
             if (isGroup) {
-                const targetParticipant = groupParticipants.find(p => p.id === rawTargetJid);
-                targetDbId = (targetParticipant && targetParticipant.lid) ? targetParticipant.lid : rawTargetJid;
-            } else {
-                targetDbId = rawTargetJid;
+                const p = groupParticipants.find(x => x.id === rawTargetJid);
+                targetDbId = p?.lid ?? rawTargetJid;
             }
 
-            if (targetDbId === commandSenderId) { // Compara IDs resueltos
-                return msg.reply('😂 No puedes robarte a ti mismo. ¡Qué tramposo!');
-            }
+            if (targetDbId === commandSenderId) return msg.reply('😂 No puedes robarte a ti mismo. ¡Qué tramposo!');
 
-            // Verificar cooldown del robo para el atacante
             const now = Date.now();
             if (now - (user.lastbrainrootrob || 0) < COOLDOWN_ROB_COMMAND_MS) {
-                const timeLeft = COOLDOWN_ROB_COMMAND_MS - (now - (user.lastbrainrootrob || 0));
-                return msg.reply(`⏳ Ya has intentado robar recientemente. Espera ${msToTime(timeLeft)} para tu próximo intento.`);
+                const left = COOLDOWN_ROB_COMMAND_MS - (now - (user.lastbrainrootrob || 0));
+                return msg.reply(`⏳ Ya intentaste robar recientemente. Espera ${msToTime(left)}.`);
             }
 
-            // Obtener datos del objetivo
             const targetUser = await getUserData(targetDbId);
-            if (!targetUser) {
-                return msg.reply(`❌ No pude encontrar los datos del usuario a robar. Asegúrate de que @${rawTargetJid.split('@')[0]} esté registrado en el bot.`);
-            }
-            const targetUserName = targetUser?.pushname || jidDecode(rawTargetJid)?.user || rawTargetJid.split('@')[0];
+            if (!targetUser) return msg.reply(`❌ No pude encontrar los datos del objetivo.`);
+            const targetUserName = targetUser?.pushname || rawTargetJid.split('@')[0];
 
-            // Verificar si el objetivo tiene Brainroots para robar
-            const targetUserCollection = await getUserBrainroots(targetDbId);
-            if (targetUserCollection.length === 0) {
-                return msg.reply(`😅 @${targetUserName} no tiene ningún Brainroot que puedas robar.`);
-            }
-            
-            // --- Lógica del robo ---
-            console.log(`[Brainroots CMD Debug] Iniciando intento de robo de ${targetUserName} por ${userNameToMention}.`);
+            const targetColl = dbLogic.getUserCollection(targetDbId);
+            if (targetColl.length === 0) return msg.reply(`😅 @${targetUserName} no tiene ningún Brainroot que puedas robar.`);
 
-            const brainrootToAttemptSteal = await getRandomUserBrainroot(targetDbId);
-            
-            if (!brainrootToAttemptSteal) {
-                console.warn(`[Brainroots CMD Debug] getRandomUserBrainroot retornó nulo para ${targetDbId}, a pesar de que la colección no está vacía.`);
-                return msg.reply(`❌ Ocurrió un error al intentar identificar un Brainroot para robar de @${targetUserName}.`);
-            }
+            const target = dbLogic.getRandomUserBrainroot(targetDbId);
+            if (!target) return msg.reply(`❌ Error al identificar un Brainroot para robar.`);
 
-            // 2. Calcular la probabilidad de éxito
-            let successChance = BASE_ROB_SUCCESS_CHANCE;
-
-            successChance -= (brainrootToAttemptSteal.rarity - 1) * RARITY_BONUS_PENALTY_PER_LEVEL;
+            let successChance = BASE_ROB_SUCCESS_CHANCE - (target.rarity - 1) * RARITY_BONUS_PENALTY_PER_LEVEL;
             successChance = Math.max(0.10, Math.min(0.90, successChance));
 
-            const roll = Math.random();
-
-            // 3. Resultado del robo
-            let outcomeMessage = '';
-            let robSuccess = false;
-
-            if (roll < successChance) { // ¡Éxito!
-                robSuccess = true;
-                // Eliminar del objetivo
-                const removed = await removeBrainrootFromUser(targetDbId, brainrootToAttemptSteal.character_id);
-                // Añadir al atacante
-                const added = await addBrainrootsToUser(commandSenderId, brainrootToAttemptSteal.character_id);
-
-                if (removed && added) {
-                    outcomeMessage = `🎉 ¡Éxito! @${userNameToMention} le ha robado un *${brainrootToAttemptSteal.name}* a @${targetUserName}!`;
-                } else {
-                    console.error(`[Brainroots CMD Debug] Error en DB después de rollo exitoso para robar ${brainrootToAttemptSteal.name} entre ${userNameToMention} y ${targetUserName}. Removed: ${removed}, Added: ${added}`);
-                    outcomeMessage = `⚠️ ¡Éxito en el intento, pero hubo un error de base de datos! El Brainroot podría no haberse movido correctamente.`;
-                }
-            } else { // Fallo
-                outcomeMessage = `😥 ¡Fallaste! @${userNameToMention} intentó robar a @${targetUserName} pero fue descubierto y no consiguió nada.`;
+            let outcomeMessage;
+            if (Math.random() < successChance) {
+                const removed = dbLogic.removeFromUser(targetDbId, target.id);
+                const added   = removed && dbLogic.addToUser(commandSenderId, target.id);
+                outcomeMessage = (removed && added)
+                    ? `🎉 ¡Éxito! @${userNameToMention} le robó un *${target.name}* a @${targetUserName}!`
+                    : `⚠️ ¡Éxito en el intento, pero hubo un error de base de datos!`;
+            } else {
+                outcomeMessage = `😥 ¡Fallaste! @${userNameToMention} intentó robar a @${targetUserName} pero fue descubierto.`;
             }
 
-            // 4. Guardar cooldown del robo
             user.lastbrainrootrob = now;
             await saveUserData(commandSenderId, user);
 
-            // 5. Enviar mensaje de resultado
-            console.log(`[Brainroots CMD Debug] Robo de ${userNameToMention} a ${targetUserName} resultado: ${robSuccess ? 'ÉXITO' : 'FALLO'}`);
             await sock.sendMessage(chatJid, {
                 text: outcomeMessage,
-                mentions: [senderOriginalJid, rawTargetJid] // Mencionar con JIDs originales
+                mentions: [senderOriginalJid, rawTargetJid],
             }, { quoted: msg._baileysMessage });
-
             return;
         }
 
-        // --- Lógica para el COMANDO DE VENDER BRAINROOTS (.brsell o .venderbr) ---
+        // =====================================================================
+        // COMANDO: .brsell / .venderbr
+        // =====================================================================
         if (['brsell', 'venderbr'].includes(commandName)) {
-            console.log(`[Brainroots CMD Debug] Procesando comando de venta '${commandName}' por ${commandSenderId} en chat ${chatJid}. Args: ${args.join(' ')}`);
+            if (args.length < 2) return msg.reply('🤔 Uso: `.brsell [Nombre del Brainroot] [Precio]`');
 
-            if (args.length < 2) {
-                return msg.reply('🤔 Uso: `.brsell [Nombre del Brainroot] [Precio]`. Ejemplo: `.brsell Charmander 150`');
-            }
+            const price = parseInt(args[args.length - 1]);
+            if (isNaN(price) || price <= 0) return msg.reply('❌ El precio debe ser un número positivo.');
 
-            const price = parseInt(args[args.length - 1]); // El último argumento es el precio
-            if (isNaN(price) || price <= 0) {
-                return msg.reply('❌ El precio debe ser un número positivo.');
-            }
+            const brainrootName = args.slice(0, -1).join(' ').trim();
+            if (!brainrootName) return msg.reply('🤔 Debes especificar el nombre del Brainroot.');
 
-            const brainrootName = args.slice(0, args.length - 1).join(' ').trim();
-            if (!brainrootName) {
-                return msg.reply('🤔 Debes especificar el nombre del Brainroot que quieres vender.');
-            }
+            const charToSell = dbLogic.getCharacterByName(brainrootName);
+            if (!charToSell) return msg.reply(`❌ No conozco ningún Brainroot llamado *${brainrootName}*.`);
 
-            const characterToSell = await getBrainrootsCharacterByName(brainrootName);
-            if (!characterToSell) {
-                return msg.reply(`❌ No conozco ningún Brainroot llamado *${brainrootName}*. Verifica el nombre.`);
-            }
+            const coll    = dbLogic.getUserCollection(commandSenderId);
+            const hasIt   = coll.some(c => c.id === charToSell.id);
+            if (!hasIt) return msg.reply(`🤷‍♀️ No tienes *${charToSell.name}* en tu colección.`);
 
-            // Verificar si el vendedor tiene el Brainroot
-            const senderCollection = await getUserBrainroots(commandSenderId);
-            const senderHasBrainroot = senderCollection.some(char => char.id === characterToSell.id);
+            const removed = dbLogic.removeFromUser(commandSenderId, charToSell.id);
+            if (!removed) return msg.reply('❌ Error al preparar el Brainroot para la venta. Inténtalo de nuevo.');
 
-            if (!senderHasBrainroot) {
-                return msg.reply(`🤷‍♀️ No tienes *${characterToSell.name}* en tu colección para vender.`);
-            }
-
-            // Eliminar una copia del Brainroot del inventario del vendedor
-            const removed = await removeBrainrootFromUser(commandSenderId, characterToSell.id);
-            if (!removed) {
-                console.error(`[Brainroots CMD Debug] Error inesperado al intentar eliminar ${characterToSell.name} de ${commandSenderId} para vender.`);
-                return msg.reply('❌ Ocurrió un error al intentar preparar tu Brainroot para la venta. Inténtalo de nuevo.');
-            }
-
-            // Añadirlo al mercado
-            const listingId = await addBrainrootToMarket(commandSenderId, characterToSell.id, price);
+            const listingId = dbLogic.addToMarket(commandSenderId, charToSell.id, price);
             if (listingId) {
-                console.log(`[Brainroots CMD Debug] ${userNameToMention} listó ${characterToSell.name} (ID:${listingId}) por ${price}.`);
-                return msg.reply(`✅ Has puesto a la venta *${characterToSell.name}* por ${MONEY_SYMBOL}${price.toLocaleString()} (ID: ${listingId}).`);
+                return msg.reply(`✅ Has puesto a la venta *${charToSell.name}* por ${MONEY_SYMBOL}${price.toLocaleString()} (ID: ${listingId}).`);
             } else {
-                console.error(`[Brainroots CMD Debug] Falló addBrainrootToMarket para ${characterToSell.name} de ${commandSenderId}.`);
-                // Si falla aquí, deberíamos intentar devolverlo al remitente
-                await addBrainrootsToUser(commandSenderId, characterToSell.id); // Intentar devolverlo
-                return msg.reply('❌ Ocurrió un error al listar el Brainroot en el mercado. Tu Brainroot ha sido devuelto.');
+                dbLogic.addToUser(commandSenderId, charToSell.id); // rollback
+                return msg.reply('❌ Error al listar en el mercado. Tu Brainroot ha sido devuelto.');
             }
         }
 
-
-        // --- Lógica para el COMANDO DE QUITAR DE LA VENTA (.brunsell o .quitarbr) ---
+        // =====================================================================
+        // COMANDO: .brunsell / .quitarbr
+        // =====================================================================
         if (['brunsell', 'quitarbr'].includes(commandName)) {
-            console.log(`[Brainroots CMD Debug] Procesando comando de desventa '${commandName}' por ${commandSenderId} en chat ${chatJid}. Args: ${args.join(' ')}`);
-
-            if (args.length === 0) {
-                return msg.reply('🤔 Uso: `.brunsell [ID del listing]`. Puedes ver el ID con `.brmarket`.');
-            }
+            if (args.length === 0) return msg.reply('🤔 Uso: `.brunsell [ID del listing]`');
 
             const listingId = parseInt(args[0]);
-            if (isNaN(listingId) || listingId <= 0) {
-                return msg.reply('❌ El ID del listing debe ser un número positivo. Puedes verlo con `.brmarket`.');
-            }
+            if (isNaN(listingId) || listingId <= 0) return msg.reply('❌ El ID debe ser un número positivo.');
 
-            const removedListing = await removeBrainrootFromMarket(listingId, commandSenderId); // Intentar quitar solo si es el vendedor
-            if (removedListing) {
-                // Devolver el Brainroot al vendedor
-                await addBrainrootsToUser(commandSenderId, removedListing.character_id);
-                const characterInfo = await getBrainrootsCharacterById(removedListing.character_id);
-                console.log(`[Brainroots CMD Debug] ${userNameToMention} quitó de la venta ${characterInfo.name} (ID:${listingId}).`);
-                return msg.reply(`✅ Has quitado *${characterInfo.name}* (ID: ${listingId}) de la venta y ha sido devuelto a tu colección.`);
+            const removed = dbLogic.removeFromMarket(listingId, commandSenderId);
+            if (removed) {
+                dbLogic.addToUser(commandSenderId, removed.character_id);
+                const charInfo = dbLogic.getCharacterById(removed.character_id);
+                return msg.reply(`✅ Has quitado *${charInfo?.name ?? 'el Brainroot'}* (ID: ${listingId}) de la venta y fue devuelto a tu colección.`);
             } else {
-                console.log(`[Brainroots CMD Debug] Falló removeBrainrootFromMarket para ID:${listingId} por ${commandSenderId}.`);
-                return msg.reply('❌ No se encontró un Brainroot en venta con ese ID o no eres el vendedor.');
+                return msg.reply('❌ No se encontró ese listing o no eres el vendedor.');
             }
         }
 
-
-        // --- Lógica para el COMANDO DE VER EL MERCADO (.brmarket o .brshop) ---
+        // =====================================================================
+        // COMANDO: .brmarket / .brshop
+        // =====================================================================
         if (['brmarket', 'brshop'].includes(commandName)) {
-            console.log(`[Brainroots CMD Debug] Procesando comando de mercado '${commandName}' por ${commandSenderId}.`);
-            const listings = await getBrainrootsMarketListings();
+            const listings = dbLogic.getMarketListings();
 
             if (listings.length === 0) {
-                return msg.reply('🛒 El mercado de Brainroots está vacío. ¡Usa `.brsell [nombre] [precio]` para vender los tuyos!');
+                return msg.reply('🛒 El mercado está vacío. ¡Usa `.brsell [nombre] [precio]` para vender los tuyos!');
             }
 
-            let marketMessage = `*🛒 Brainroots en el Mercado:*\n\n`;
-            const mentionsToSend = []; // Para las menciones en el mensaje final
-            for (const listing of listings) {
-                const sellerUser = await getUserData(listing.seller_id); // Obtener datos del vendedor
-                const sellerOriginalJid = listing.seller_id; // Suponemos que seller_id en el listing es el JID o LID que sirve para getUserData y menciones
-                const sellerName = sellerUser?.pushname || jidDecode(sellerOriginalJid)?.user || sellerOriginalJid.split('@')[0]; // Nombre del vendedor
-                marketMessage += `[ID: ${listing.listing_id}] *${listing.name}* (Rareza: ${listing.rarity}/5)\n`;
-                marketMessage += `   Precio: ${MONEY_SYMBOL}${listing.listing_price.toLocaleString()} | Vendedor: @${sellerName}\n`;
-                mentionsToSend.push(sellerOriginalJid); // Añadir el JID original del vendedor para la mención
+            let marketMsg = '*🛒 Brainroots en el Mercado:*\n\n';
+            const uniqueMentions = [...new Set(listings.map(l => l.seller_id))];
+
+            for (const l of listings) {
+                const sellerUser = await getUserData(l.seller_id);
+                const sellerName = sellerUser?.pushname || l.seller_id.split('@')[0];
+                marketMsg += `[ID: ${l.listing_id}] *${l.name}* (Rareza: ${l.rarity}/5)\n`;
+                marketMsg += `   Precio: ${MONEY_SYMBOL}${l.listing_price.toLocaleString()} | Vendedor: @${sellerName}\n`;
             }
-            marketMessage += `\nUsa \`.brbuy [ID del listing]\` para comprar.`;
-            console.log(`[Brainroots CMD Debug] Enviando lista del mercado a ${commandSenderId}.`);
-            // Asegurarse de que mentionsToSend solo contenga JIDs únicos
-            const uniqueMentions = [...new Set(mentionsToSend)];
-            return sock.sendMessage(chatJid, { text: marketMessage, mentions: uniqueMentions }, { quoted: msg._baileysMessage });
+            marketMsg += '\nUsa `.brbuy [ID]` para comprar.';
+
+            return sock.sendMessage(chatJid, { text: marketMsg, mentions: uniqueMentions }, { quoted: msg._baileysMessage });
         }
 
-
-        // --- Lógica para el COMANDO DE COMPRAR BRAINROOTS (.brbuy o .comprarbr) ---
+        // =====================================================================
+        // COMANDO: .brbuy / .comprarbr
+        // =====================================================================
         if (['brbuy', 'comprarbr'].includes(commandName)) {
-            console.log(`[Brainroots CMD Debug] Procesando comando de compra '${commandName}' por ${commandSenderId} en chat ${chatJid}. Args: ${args.join(' ')}`);
-
-            if (args.length === 0) {
-                return msg.reply('🤔 Uso: `.brbuy [ID del listing]`. Puedes ver el ID con `.brmarket`.');
-            }
+            if (args.length === 0) return msg.reply('🤔 Uso: `.brbuy [ID del listing]`');
 
             const listingId = parseInt(args[0]);
-            if (isNaN(listingId) || listingId <= 0) {
-                return msg.reply('❌ El ID del listing debe ser un número positivo. Puedes verlo con `.brmarket`.');
+            if (isNaN(listingId) || listingId <= 0) return msg.reply('❌ El ID debe ser un número positivo.');
+
+            const listing = dbLogic.getMarketListingById(listingId);
+            if (!listing) return msg.reply(`❌ No hay ningún Brainroot en venta con el ID *${listingId}*.`);
+
+            if (listing.seller_id === commandSenderId) {
+                return msg.reply('😅 No puedes comprarte tu propio Brainroot. Usa `.brunsell [ID]` para quitarlo.');
             }
 
-            const listing = await getBrainrootMarketListingById(listingId);
-            if (!listing) {
-                return msg.reply(`❌ No se encontró ningún Brainroot en venta con el ID *${listingId}*. Revisa \`.brmarket\`.`);
+            if (user.money < listing.price) {
+                return msg.reply(`💸 No tienes suficiente dinero (${MONEY_SYMBOL}${user.money.toLocaleString()}) para comprar *${listing.name}* (Precio: ${MONEY_SYMBOL}${listing.price.toLocaleString()}).`);
             }
 
-            if (listing.seller_id === commandSenderId) { // Compara con el ID resuelto
-                return msg.reply('😅 No puedes comprar tu propio Brainroot. Usa `.brunsell [ID]` para quitarlo de la venta.');
-            }
+            // Deducir dinero al comprador
+            user.money -= listing.price;
+            await saveUserData(commandSenderId, user);
 
-            // Verificar dinero del comprador
-            if (user.money < listing.listing_price) {
-                return msg.reply(`💸 No tienes suficiente dinero (${MONEY_SYMBOL}${user.money.toLocaleString()}) para comprar *${listing.name}* (Precio: ${MONEY_SYMBOL}${listing.listing_price.toLocaleString()}).`);
-            }
-
-            // Deducir dinero del comprador
-            user.money -= listing.listing_price;
-            await saveUserData(commandSenderId, user); // Guarda por el ID resuelto del comprador
-
-           // Añadir dinero al vendedor
+            // Acreditar al vendedor
             const sellerUser = await getUserData(listing.seller_id);
-            const sellerOriginalJid = listing.seller_id; // JID o LID del vendedor para getUserData
-            const sellerName = sellerUser?.pushname || jidDecode(sellerOriginalJid)?.user || sellerOriginalJid.split('@')[0]; // Nombre del vendedor para display
-            
+            const sellerName = sellerUser?.pushname || listing.seller_id.split('@')[0];
             if (sellerUser) {
-                sellerUser.money += listing.listing_price;
-                await saveUserData(listing.seller_id, sellerUser); // Guarda por el ID resuelto del vendedor
-                console.log(`[Brainroots CMD Debug] Vendedor ${sellerName} (${listing.seller_id}) recibió ${listing.listing_price} por listing ${listingId}.`);
-                
-                // --- NUEVO: Enviar mensaje directo al vendedor ---
+                sellerUser.money += listing.price;
+                await saveUserData(listing.seller_id, sellerUser);
+
+                // DM de confirmación al vendedor
                 try {
-                    const dmSellerJid = sellerUser.phoneNumber ? `${sellerUser.phoneNumber}@s.whatsapp.net` : sellerOriginalJid; // Usar número si está, o JID original
-                    if (dmSellerJid.includes('@s.whatsapp.net')) {
-                        await sock.sendMessage(dmSellerJid, { 
-                            text: `🎉 ¡Felicidades, @${sellerName}! Tu *${listing.name}* (ID: ${listing.listing_id}) ha sido vendido a @${userNameToMention} por ${MONEY_SYMBOL}${listing.listing_price.toLocaleString()} en el mercado de Brainroots.` +
-                                  `\nTu nuevo saldo: ${MONEY_SYMBOL}${sellerUser.money.toLocaleString()}`
-                        }, { mentions: [sellerOriginalJid, senderOriginalJid] }); // Mencionar a ambos en el DM al vendedor (JIDs originales)
-                        console.log(`[Brainroots CMD Debug] DM de confirmación de venta enviado a ${sellerName}.`);
+                    const dmJid = sellerUser.phoneNumber ? `${sellerUser.phoneNumber}@s.whatsapp.net` : listing.seller_id;
+                    if (dmJid.includes('@s.whatsapp.net')) {
+                        await sock.sendMessage(dmJid, {
+                            text: `🎉 Tu *${listing.name}* (ID: ${listingId}) fue vendido a @${userNameToMention} por ${MONEY_SYMBOL}${listing.price.toLocaleString()}.\nNuevo saldo: ${MONEY_SYMBOL}${sellerUser.money.toLocaleString()}`,
+                        }, { mentions: [listing.seller_id, senderOriginalJid] });
                     }
-                } catch (dmError) {
-                    console.error(`[Brainroots CMD Debug] ERROR al enviar DM de confirmación a vendedor ${sellerName} (${listing.seller_id}):`, dmError);
+                } catch (dmErr) {
+                    console.error(`[Brainroots] Error enviando DM de venta a ${sellerName}:`, dmErr);
                 }
-                // --- FIN NUEVO BLOQUE ---
-
-            } else {
-                console.warn(`[Brainroots CMD Debug] Vendedor ${listing.seller_id} no encontrado para darle el dinero por listing ${listingId}. Dinero perdido.`);
             }
 
-            // Añadir el Brainroot al comprador
-            const addedToBuyer = await addBrainrootsToUser(commandSenderId, listing.character_id); // Añadir al ID resuelto del comprador
-            if (!addedToBuyer) {
-                console.error(`[Brainroots CMD Debug] Error añadiendo ${listing.name} a ${userNameToMention} (ID:${commandSenderId}) después de la compra.`);
-                // Intentar devolver el dinero si no se pudo añadir
-                user.money += listing.listing_price;
+            // Añadir Brainroot al comprador
+            const added = dbLogic.addToUser(commandSenderId, listing.character_id);
+            if (!added) {
+                // Rollback
+                user.money += listing.price;
                 await saveUserData(commandSenderId, user);
-                if (sellerUser) {
-                    sellerUser.money -= listing.listing_price;
-                    await saveUserData(listing.seller_id, sellerUser);
-                }
-                return msg.reply('❌ Ocurrió un error al añadir el Brainroot a tu colección después de la compra. Tu dinero ha sido devuelto. Inténtalo de nuevo.');
+                if (sellerUser) { sellerUser.money -= listing.price; await saveUserData(listing.seller_id, sellerUser); }
+                return msg.reply('❌ Error al añadir el Brainroot a tu colección. Tu dinero fue devuelto.');
             }
 
-            // Quitar el listing del mercado
-            await removeBrainrootFromMarket(listingId);
+            // Eliminar listing del mercado
+            dbLogic.removeFromMarket(listingId);
 
-            console.log(`[Brainroots CMD Debug] ${userNameToMention} compró ${listing.name} (ID:${listingId}) de ${sellerName}.`);
             await sock.sendMessage(chatJid, {
-                text: `🎉 ¡@${userNameToMention} ha comprado un *${listing.name}* por ${MONEY_SYMBOL}${listing.listing_price.toLocaleString()} de @${sellerName}!` +
-                      `\nTu nuevo saldo: ${MONEY_SYMBOL}${user.money.toLocaleString()}`,
-                mentions: [senderOriginalJid, sellerOriginalJid] // Mencionar a ambos (JIDs originales)
+                text: `🎉 ¡@${userNameToMention} compró un *${listing.name}* por ${MONEY_SYMBOL}${listing.price.toLocaleString()} de @${sellerName}!\nNuevo saldo: ${MONEY_SYMBOL}${user.money.toLocaleString()}`,
+                mentions: [senderOriginalJid, listing.seller_id],
             }, { quoted: msg._baileysMessage });
-
             return;
         }
 
-        
-        // Si se llega aquí, el comando no es ninguno de los conocidos
-        console.warn(`[Brainroots CMD Debug] Comando desconocido '${commandName}' en plugin Brainroots. No debería ocurrir con los alias configurados.`);
+        console.warn(`[Brainroots] Comando desconocido '${commandName}'. Esto no debería ocurrir.`);
     },
 
-    // Exportar las variables y funciones clave
-    getAllCharacters: () => allCharacters,
-    getRarityWeights: () => rarityWeights,
-    getCooldownSpawnCommandMs: () => COOLDOWN_SPAWN_COMMAND_MS,
-    getCatchWindowMs: () => CATCH_WINDOW_MS,
-    getCooldownRobCommandMs: () => COOLDOWN_ROB_COMMAND_MS,
-    getBaseRobSuccessChance: () => BASE_ROB_SUCCESS_CHANCE,
+    // -------------------------------------------------------------------------
+    // API pública del plugin (para otros módulos o pruebas)
+    // -------------------------------------------------------------------------
+    getAllCharacters:             () => allCharacters,
+    getRarityWeights:            () => rarityWeights,
+    getCooldownSpawnCommandMs:   () => COOLDOWN_SPAWN_COMMAND_MS,
+    getCatchWindowMs:            () => CATCH_WINDOW_MS,
+    getCooldownRobCommandMs:     () => COOLDOWN_ROB_COMMAND_MS,
+    getBaseRobSuccessChance:     () => BASE_ROB_SUCCESS_CHANCE,
     getRarityBonusPenaltyPerLevel: () => RARITY_BONUS_PENALTY_PER_LEVEL,
 };

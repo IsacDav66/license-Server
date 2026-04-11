@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { getUserData, saveUserData } = require('../shared-economy');
+const { getUserData, saveUserData } = require('../../lib/bot-core');
 
 const activeDuels = new Map();
 const ASSETS_DIR = path.join(__dirname, '..', '..', 'assets', 'cartas');

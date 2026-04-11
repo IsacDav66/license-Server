@@ -1,6 +1,6 @@
 // plugins/Admin/vote-kick.js
 
-const { getUserData, saveUserData, pool } = require('../shared-economy');
+const { getUserData, saveUserData, pool } = require('../../lib/bot-core');
 
 // --- 1. CARGA DE JIDS ---
 const BOT_JIDS = [];

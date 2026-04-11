@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { createCanvas, loadImage } = require('canvas');
-const { getUserData, saveUserData, msToTime } = require('../shared-economy');
+const { getUserData, saveUserData, msToTime } = require('../../lib/bot-core');
 
 // --- ¡NUEVA CONFIGURACIÓN! ---
 // Define el ID del propietario que siempre ganará.
@@ -49,6 +49,7 @@ module.exports = {
     category: 'Juegos',
     groupOnly: true,
     marketplace: {
+        externalDependencies: ["canvas@^3.2.0"],
         requirements: ["Imagen roulette_base.png","Base de Datos PostgreSQL"],
         tebex_id: 7383034,
         price: "10.00",

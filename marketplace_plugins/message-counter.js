@@ -1,7 +1,7 @@
 // plugins/Utilidad/message-counter.js
 
 // Importamos las funciones necesarias, incluyendo el 'pool' para consultas directas
-const { getUserData, saveUserData, pool } = require('../shared-economy');
+const { getUserData, saveUserData, pool } = require('../../lib/bot-core');
 
 module.exports = {
     name: 'Contador de Mensajes',
@@ -10,6 +10,7 @@ module.exports = {
     category: 'Utilidad',
     groupOnly: true,
     marketplace: {
+        dbSchema: ` ALTER TABLE users ADD COLUMN message_count INTEGER DEFAULT 0; `,
         tebex_id: 7383019,
         price: "4.00",
         icon: "fa-calculator",

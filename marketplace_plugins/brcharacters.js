@@ -1,12 +1,28 @@
 // plugins/brcharacters.js
 
+
+const brDB = {
+    getAll: () => db.prepare('SELECT * FROM brainroots_characters ORDER BY rarity ASC').all(),
+    getById: (id) => db.prepare('SELECT * FROM brainroots_characters WHERE id = ?').get(id),
+    getByName: (n) => db.prepare('SELECT * FROM brainroots_characters WHERE LOWER(name) = LOWER(?)').get(n),
+    addToUser: (u, c) => { const ts = Date.now(); db.prepare('INSERT INTO user_brainroots (user_id, character_id, catch_timestamp, last_income_timestamp) VALUES (?, ?, ?, ?)').run(u, c, ts, ts); },
+    getUserColl: (u) => db.prepare('SELECT ub.id AS entry_id, bc.*, ub.catch_timestamp, ub.last_income_timestamp FROM user_brainroots ub JOIN brainroots_characters bc ON ub.character_id = bc.id WHERE ub.user_id = ?').all(u),
+    updateIncome: (id, ts) => db.prepare('UPDATE user_brainroots SET last_income_timestamp = ? WHERE id = ?').run(ts, id),
+    remove: (u, c) => { const row = db.prepare('SELECT id FROM user_brainroots WHERE user_id = ? AND character_id = ? LIMIT 1').get(u, c); if(row) db.prepare('DELETE FROM user_brainroots WHERE id = ?').run(row.id); return !!row; },
+    getRandom: (u) => db.prepare('SELECT ub.id as entry_id, bc.* FROM user_brainroots ub JOIN brainroots_characters bc ON ub.character_id = bc.id WHERE ub.user_id = ? ORDER BY RANDOM() LIMIT 1').get(u),
+    addMarket: (s, c, p) => db.prepare('INSERT INTO brainroots_market (seller_id, character_id, price, listing_timestamp) VALUES (?, ?, ?, ?)').run(s, c, p, Date.now()).lastInsertRowid,
+    removeMarket: (id, s) => s ? db.prepare('DELETE FROM brainroots_market WHERE id = ? AND seller_id = ? RETURNING *').get(id, s) : db.prepare('DELETE FROM brainroots_market WHERE id = ? RETURNING *').get(id),
+    getListings: () => db.prepare('SELECT bm.id as listing_id, bc.name, bc.rarity, bm.price as listing_price, bm.seller_id FROM brainroots_market bm JOIN brainroots_characters bc ON bm.character_id = bc.id').all(),
+    getListingById: (id) => db.prepare('SELECT * FROM brainroots_market WHERE id = ?').get(id)
+};
+
 const fs = require('fs');
 const path = require('path');
 const { createCanvas, loadImage } = require('canvas'); // Mantenemos createCanvas y loadImage de 'canvas'
 const sharp = require('sharp'); // ¡Importamos sharp!
 
 // Importamos la función necesaria desde shared-economy.js
-const { getAllBrainrootsCharacters } = require('../shared-economy');
+const { getAllBrainrootsCharacters } = require('../../lib/bot-core');
 
 const MONEY_SYMBOL = '$'; // Símbolo de dinero
 const ASSETS_BRAINROOTS_DIR = path.join(__dirname, '..', 'assets', 'brainroots'); // Ruta a las imágenes de los Brainroots
@@ -18,6 +34,7 @@ module.exports = {
     category: 'Brainroots',
     groupOnly: false,
     marketplace: {
+        externalDependencies: ["canvas@^3.2.0","sharp@^0.32.6"],
         tebex_id: 7383075,
         price: "7.00",
         icon: "fa-images",
@@ -34,7 +51,7 @@ module.exports = {
 
     async execute(sock, m) {
         try {
-            const allCharacters = await getAllBrainrootsCharacters();
+            const allCharacters = await brDB.getAll();
 
             if (!allCharacters || allCharacters.length === 0) {
                 return m.reply('❌ No se encontraron personajes Brainroots disponibles para generar la imagen.');

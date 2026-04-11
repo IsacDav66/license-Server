@@ -2,7 +2,7 @@
 
 const path = require('path');
 const { createCanvas, loadImage } = require('canvas');
-const { getUserData, saveUserData, msToTime } = require('../shared-economy');
+const { getUserData, saveUserData, msToTime } = require('../../lib/bot-core');
 
 // --- CONFIGURACIÓN ---
 const MONEY_SYMBOL = '$';
@@ -140,6 +140,7 @@ module.exports = {
     category: 'Juegos',
     groupOnly: true,
     marketplace: {
+        externalDependencies: ["canvas@^3.2.0"],
         requirements: ["Carpeta assets/slots","Base de Datos PostgreSQL"],
         tebex_id: 7383035,
         price: "7.00",
