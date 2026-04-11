@@ -175,21 +175,29 @@ app.post('/stunbot/tebex-webhook', async (req, res) => {
     }
 });
 
-// 1. Nueva conexión a la base de datos de contenido (Brainroots)
+
+// 1. Conexión a la DB de Brainroots (Aiven)
 const brainrootsPool = new Pool({
-    connectionString: process.env.BRAINROOTS_DATABASE_URL, // <--- CAMBIA ESTO
-    ssl: { rejectUnauthorized: false }
+    connectionString: process.env.BRAINROOTS_DATABASE_URL, // La URL que empieza por postgres://
+    ssl: {
+        rejectUnauthorized: false // <--- ESTO ARREGLA EL ERROR DEL CERTIFICADO
+    }
 });
 
-// 2. Endpoint de Sincronización para los bots clientes
+// 2. Endpoint de Sincronización
 app.get('/stunbot/api/sync/brainroots', async (req, res) => {
     try {
-        console.log("☁️  Sincronizando Brainroots desde la DB externa...");
+        console.log("☁️  Consultando Brainroots en Aiven...");
         const result = await brainrootsPool.query('SELECT name, rarity, price, image_filename FROM brainroots_characters');
-        res.json(result.rows); // Enviamos los datos reales de Aiven
+        
+        if (result.rows.length === 0) {
+            console.warn("⚠️ La DB de Aiven no devolvió personajes.");
+        }
+
+        res.json(result.rows);
     } catch (e) {
-        console.error("Error consultando DB de Aiven:", e.message);
-        res.status(500).json({ error: "Fallo en sincronización" });
+        console.error("❌ Error consultando DB de Aiven:", e.message);
+        res.status(500).json({ error: "Fallo en la conexión con la base de datos de contenido" });
     }
 });
 // ==========================================
