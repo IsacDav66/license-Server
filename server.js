@@ -177,7 +177,7 @@ app.post('/stunbot/tebex-webhook', async (req, res) => {
 
 // 1. Nueva conexión a la base de datos de contenido (Brainroots)
 const brainrootsPool = new Pool({
-    connectionString: "postgres://avnadmin:AVNS_8T5Ef6OrEyxxdVmMoO9@basebotaiven-isadavid-3be1.f.aivencloud.com:20440/defaultdb?sslmode=require",
+    connectionString: process.env.BRAINROOTS_DATABASE_URL, // <--- CAMBIA ESTO
     ssl: { rejectUnauthorized: false }
 });
 
