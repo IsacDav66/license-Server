@@ -176,28 +176,29 @@ app.post('/stunbot/tebex-webhook', async (req, res) => {
 });
 
 
-// 1. Conexión a la DB de Brainroots (Aiven)
+// 1. Ruta al certificado que acabas de subir
+const caAivenPath = path.join(__dirname, 'ca-aiven.pem');
+
+// 2. Conexión a la DB de Brainroots usando el Certificado Real
 const brainrootsPool = new Pool({
-    connectionString: process.env.BRAINROOTS_DATABASE_URL, // La URL que empieza por postgres://
+    connectionString: process.env.BRAINROOTS_DATABASE_URL,
     ssl: {
-        rejectUnauthorized: false // <--- ESTO ARREGLA EL ERROR DEL CERTIFICADO
+        // Leemos el certificado
+        ca: fs.readFileSync(caAivenPath).toString(),
+        // Ahora sí podemos poner esto en true para máxima seguridad
+        rejectUnauthorized: true 
     }
 });
 
-// 2. Endpoint de Sincronización
+// 3. Endpoint de Sincronización
 app.get('/stunbot/api/sync/brainroots', async (req, res) => {
     try {
-        console.log("☁️  Consultando Brainroots en Aiven...");
+        console.log("☁️  Consultando Brainroots con certificado CA...");
         const result = await brainrootsPool.query('SELECT name, rarity, price, image_filename FROM brainroots_characters');
-        
-        if (result.rows.length === 0) {
-            console.warn("⚠️ La DB de Aiven no devolvió personajes.");
-        }
-
         res.json(result.rows);
     } catch (e) {
-        console.error("❌ Error consultando DB de Aiven:", e.message);
-        res.status(500).json({ error: "Fallo en la conexión con la base de datos de contenido" });
+        console.error("❌ Error con CA.pem:", e.message);
+        res.status(500).json({ error: "Error de autenticación SSL con la base de datos" });
     }
 });
 // ==========================================
